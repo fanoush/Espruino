@@ -48,15 +48,16 @@ static JsVarInt NO_INLINE OneWireRead(Pin pin, int bits) {
   jshPinSetState(pin, JSHPINSTATE_GPIO_OUT_OPENDRAIN_PULLUP);
   JsVarInt result = 0;
   JsVarInt mask = 1;
+  uint8_t nested;
   while (bits-- > 0) {
-    jshInterruptOff();
+    jshInterruptOff(&nested);
     jshPinSetValue(pin, 0);
     jshDelayMicroseconds(3);
     jshPinSetValue(pin, 1);
     jshDelayMicroseconds(10); // leave time to let it rise
     if (jshPinGetValue(pin))
       result = result | mask;
-    jshInterruptOn();
+    jshInterruptOn(nested);
     jshDelayMicroseconds(53);
     mask = mask << 1;
   }
@@ -68,20 +69,21 @@ static JsVarInt NO_INLINE OneWireRead(Pin pin, int bits) {
 static void NO_INLINE OneWireWrite(Pin pin, int bits, unsigned long long data) {
   jshPinSetState(pin, JSHPINSTATE_GPIO_OUT_OPENDRAIN_PULLUP);
   unsigned long long mask = 1;
+  uint8_t nested;
   while (bits-- > 0) {
     if (data & mask) { // short pulse
-      jshInterruptOff();
+      jshInterruptOff(&nested);
       jshPinSetValue(pin, 0);
       jshDelayMicroseconds(10);
       jshPinSetValue(pin, 1);
-      jshInterruptOn();
+      jshInterruptOn(nested);
       jshDelayMicroseconds(55);
     } else {  // long pulse
-      jshInterruptOff();
+      jshInterruptOff(&nested);
       jshPinSetValue(pin, 0);
       jshDelayMicroseconds(65);
       jshPinSetValue(pin, 1);
-      jshInterruptOn();
+      jshInterruptOn(nested);
       jshDelayMicroseconds(5);
     }
     mask = mask << 1;

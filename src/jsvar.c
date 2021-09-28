@@ -485,13 +485,14 @@ JsVar *jsvNewWithFlags(JsVarFlags flags) {
     return 0;
   }
   JsVar *v = 0;
-  jshInterruptOff(); // to allow this to be used from an IRQ
+  uint8_t nested;
+  jshInterruptOff(&nested); // to allow this to be used from an IRQ
   if (jsVarFirstEmpty!=0) {
     v = jsvGetAddressOf(jsVarFirstEmpty); // jsvResetVariable will lock
     jsVarFirstEmpty = jsvGetNextSibling(v); // move our reference to the next in the free list
     touchedFreeList = true;
   }
-  jshInterruptOn();
+  jshInterruptOn(nested);
   if (v) {
     assert(v->flags == JSV_UNUSED);
     // Cope with IRQs/multi-threading when getting a new free variable
@@ -540,11 +541,12 @@ static void jsvFreePtrInternal(JsVar *var) {
   assert(jsvGetLocks(var)==0);
   var->flags = JSV_UNUSED;
   // add this to our free list
-  jshInterruptOff(); // to allow this to be used from an IRQ
+  uint8_t nested;
+  jshInterruptOff(&nested); // to allow this to be used from an IRQ
   jsvSetNextSibling(var, jsVarFirstEmpty);
   jsVarFirstEmpty = jsvGetRef(var);
   touchedFreeList = true;
-  jshInterruptOn();
+  jshInterruptOn(nested);
 }
 
 ALWAYS_INLINE void jsvFreePtr(JsVar *var) {
@@ -594,7 +596,8 @@ ALWAYS_INLINE void jsvFreePtr(JsVar *var) {
       // and insert it in the right place in the free list
       // So, iterate along free list to figure out where we
       // need to insert the free items
-      jshInterruptOff(); // to allow this to be used from an IRQ
+      uint8_t nested;
+      jshInterruptOff(&nested); // to allow this to be used from an IRQ
       JsVarRef insertBefore = jsVarFirstEmpty;
       JsVarRef insertAfter = 0;
       while (insertBefore && insertBefore<i) {
@@ -615,7 +618,7 @@ ALWAYS_INLINE void jsvFreePtr(JsVar *var) {
       else
         jsVarFirstEmpty = insertBefore;
       touchedFreeList = true;
-      jshInterruptOn();
+      jshInterruptOn(nested);
     } else if (jsvIsBasicString(var)) {
 #ifdef CLEAR_MEMORY_ON_FREE
       jsvSetFirstChild(var, 0); // firstchild could have had string data in
@@ -831,7 +834,7 @@ JsVar *jsvNewFlatStringOfLength(unsigned int byteLength) {
           if (blockCount>=requiredBlocks) {
             JsVar *nextVar = jsvGetAddressOf(next);
             JsVarRef nextFree = jsvGetNextSibling(nextVar);
-            jshInterruptOff();
+            uint8_t nested;jshInterruptOff(&nested);
             if (!touchedFreeList) {
               // we're there! Quickly re-link free list
               if (beforeStartBlock) {
@@ -844,7 +847,7 @@ JsVar *jsvNewFlatStringOfLength(unsigned int byteLength) {
               jsvResetVariable(flatString, JSV_FLAT_STRING);
               flatString->varData.integer = (JsVarInt)byteLength;
             }
-            jshInterruptOn();
+            jshInterruptOn(nested);
             // if success, break out!
             if (flatString) break;
           }
@@ -3874,7 +3877,7 @@ void jsvDefragment() {
   // also puts free list in order
   jsvGarbageCollect();
   // Fill defragVars with defraggable variables
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   const int DEFRAGVARS = 256; // POWER OF 2
   JsVarRef defragVars[DEFRAGVARS];
   memset(defragVars, 0, sizeof(defragVars));
@@ -3944,7 +3947,7 @@ void jsvDefragment() {
   }
   // rebuild free var list
   jsvCreateEmptyVarList();
-  jshInterruptOn();
+  jshInterruptOn(nested);
 }
 
 // Dump any locked variables that aren't referenced from `global` - for debugging memory leaks

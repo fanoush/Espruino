@@ -96,8 +96,8 @@ JsSysTime jshGetTimeFromMilliseconds(JsVarFloat ms);
 JsVarFloat jshGetMillisecondsFromTime(JsSysTime time);
 
 // software IO functions...
-void jshInterruptOff(); ///< disable interrupts to allow short delays to be accurate
-void jshInterruptOn();  ///< re-enable interrupts
+void jshInterruptOff(uint8_t *nested); ///< disable interrupts to allow short delays to be accurate
+void jshInterruptOn(uint8_t nested);  ///< re-enable interrupts
 bool jshIsInInterrupt(); ///< Are we currently in an interrupt?
 void jshDelayMicroseconds(int microsec);  ///< delay a few microseconds. Should use used sparingly and for very short periods - max 1ms
 

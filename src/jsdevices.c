@@ -344,7 +344,7 @@ void jshTransmitMove(IOEventFlags from, IOEventFlags to) {
     }
   } else {
     // Otherwise just rename the contents of the buffer
-    jshInterruptOff();
+    uint8_t nested;jshInterruptOff(&nested);
     unsigned char tempTail = txTail;
     while (tempTail != txHead) {
       if (IOEVENTFLAGS_GETTYPE(txBuffer[tempTail].flags) == from) {
@@ -352,7 +352,7 @@ void jshTransmitMove(IOEventFlags from, IOEventFlags to) {
       }
       tempTail = (unsigned char)((tempTail+1)&TXBUFFERMASK);
     }
-    jshInterruptOn();
+    jshInterruptOn(nested);
   }
 }
 
@@ -379,16 +379,16 @@ void CALLED_FROM_INTERRUPT jshPushEvent(IOEvent *evt) {
    * We're disabling IRQs for this bit because it's actually quite likely for
    * USB and USART data to be coming in at the same time, and it can trip
    * things up if one IRQ interrupts another. */
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   unsigned char nextHead = (unsigned char)((ioHead+1) & IOBUFFERMASK);
   if (ioTail == nextHead) {
-    jshInterruptOn();
+    jshInterruptOn(nested);
     jshIOEventOverflowed();
     return; // queue full - dump this event!
   }
   ioBuffer[ioHead] = *evt;
   ioHead = nextHead;
-  jshInterruptOn();
+  jshInterruptOn(nested);
 }
 
 /// Attempt to push characters onto an existing event
@@ -519,7 +519,7 @@ bool jshPopIOEventOfType(IOEventFlags eventType, IOEvent *result) {
       /* We need IRQ off for this, because if we get data it's possible
       that the IRQ will push data and will try and add characters to this
       exact position in the buffer */
-      jshInterruptOff();
+      uint8_t nested;jshInterruptOff(&nested);
       *result = ioBuffer[i];
       // work back and shift all items in out queue
       unsigned char n = (unsigned char)((i+IOBUFFERMASK) & IOBUFFERMASK);
@@ -530,7 +530,7 @@ bool jshPopIOEventOfType(IOEventFlags eventType, IOEvent *result) {
       }
       // finally update the tail pointer, and return
       ioTail = (unsigned char)((ioTail+1) & IOBUFFERMASK);
-      jshInterruptOn();
+      jshInterruptOn(nested);
       return true;
     }
     i = (unsigned char)((i+1) & IOBUFFERMASK);
@@ -693,16 +693,16 @@ void jshSetFlowControlXON(IOEventFlags device, bool hostShouldTransmit) {
     if ((*deviceState) & SDS_FLOW_CONTROL_XON_XOFF) {
       if (hostShouldTransmit) {
         if (((*deviceState)&(SDS_XOFF_SENT|SDS_XON_PENDING)) == SDS_XOFF_SENT) {
-          jshInterruptOff();
+          uint8_t nested;jshInterruptOff(&nested);
           (*deviceState) |= SDS_XON_PENDING;
-          jshInterruptOn();
+          jshInterruptOn(nested);
           jshUSARTKick(device);
         }
       } else { // !hostShouldTransmit
         if (((*deviceState)&(SDS_XOFF_SENT|SDS_XOFF_PENDING)) == 0) {
-          jshInterruptOff();
+          uint8_t nested;jshInterruptOff(&nested);
           (*deviceState) |= SDS_XOFF_PENDING;
-          jshInterruptOn();
+          jshInterruptOn(nested);
           jshUSARTKick(device);
         }
       }

@@ -1006,26 +1006,34 @@ JsVarFloat jshGetMillisecondsFromTime(JsSysTime time) {
   return (time * 1000.0) / SYSCLK_FREQ;
 }
 
-static uint8_t region;
-void jshInterruptOff() {
+uint8_t volatile wasNested;
+void jshInterruptOff(uint8_t *nested) {
 #if defined(BLUETOOTH)
 #if defined(NRF52_SERIES)
   // disable non-softdevice IRQs. This only seems available on Cortex M3 (not the nRF51's M0)
   __set_BASEPRI(4<<5); // Disabling interrupts completely is not reasonable when using one of the SoftDevices.
 #else
-  sd_nvic_critical_region_enter(&region);
+//  __disable_irq();
+  sd_nvic_critical_region_enter(nested);
+  if (*nested) wasNested++;
 #endif
 #else
   __disable_irq();
 #endif
 }
 
-void jshInterruptOn() {
+// no nesting means interrupts get always enabled in this call
+#define NO_NESTING
+void jshInterruptOn(uint8_t nested) {
 #if defined(BLUETOOTH)
 #if defined(NRF52_SERIES)
   __set_BASEPRI(0);
 #else  
-  sd_nvic_critical_region_exit(region);
+//  __enable_irq();
+#ifdef NO_NESTING
+  nested = 0;
+#endif
+  sd_nvic_critical_region_exit(nested);
 #endif
 #else
   __enable_irq();

@@ -26,7 +26,7 @@ volatile unsigned char utilTimerTasksTail = 0;
 volatile bool utilTimerOn = false;
 
 unsigned int utilTimerBit;
-bool utilTimerInIRQ = false;
+volatile bool utilTimerInIRQ = false;
 unsigned int utilTimerData;
 uint16_t utilTimerReload0H, utilTimerReload0L, utilTimerReload1H, utilTimerReload1L;
 /// When did the timer last run? This is used for timekeeping. Should be jshGetSystemTime() cropped to 32 bits
@@ -235,8 +235,8 @@ bool utilTimerInsertTask(UtilTimerTask *task) {
   // check if queue is full or not
   if (utilTimerIsFull()) return false;
 
-
-  if (!utilTimerInIRQ) jshInterruptOff();
+  uint8_t nested=0;
+  if (!utilTimerInIRQ) jshInterruptOff(&nested);
   if (utilTimerOn)
     task->time += utilTimerTime - (int)jshGetSystemTime();
 
@@ -266,13 +266,13 @@ bool utilTimerInsertTask(UtilTimerTask *task) {
     jstRestartUtilTimer();
   }
 
-  if (!utilTimerInIRQ) jshInterruptOn();
+  if (!utilTimerInIRQ) jshInterruptOn(nested);
   return true;
 }
 
 /// Remove the task that that 'checkCallback' returns true for. Returns false if none found
 bool utilTimerRemoveTask(bool (checkCallback)(UtilTimerTask *task, void* data), void *checkCallbackData) {
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   unsigned char ptr = utilTimerTasksHead;
   if (ptr != utilTimerTasksTail) {
     unsigned char endPtr = ((utilTimerTasksTail+UTILTIMERTASK_TASKS-1) & (UTILTIMERTASK_TASKS-1));
@@ -289,19 +289,19 @@ bool utilTimerRemoveTask(bool (checkCallback)(UtilTimerTask *task, void* data), 
         }
         // move 'end' pointer back
         utilTimerTasksTail = (utilTimerTasksTail+1) & (UTILTIMERTASK_TASKS-1);
-        jshInterruptOn();
+        jshInterruptOn(nested);
         return true;
       }
       ptr = (ptr+UTILTIMERTASK_TASKS-1) & (UTILTIMERTASK_TASKS-1);
     }
   }
-  jshInterruptOn();
+  jshInterruptOn(nested);
   return false;
 }
 
 /// If 'checkCallback' returns true for a task, set 'task' to it and return true. Returns false if none found
 bool utilTimerGetLastTask(bool (checkCallback)(UtilTimerTask *task, void* data), void *checkCallbackData, UtilTimerTask *task) {
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   unsigned char ptr = utilTimerTasksHead;
   if (ptr != utilTimerTasksTail) {
     ptr = (ptr+UTILTIMERTASK_TASKS-1) & (UTILTIMERTASK_TASKS-1);
@@ -309,13 +309,13 @@ bool utilTimerGetLastTask(bool (checkCallback)(UtilTimerTask *task, void* data),
     while (ptr != ((utilTimerTasksTail+UTILTIMERTASK_TASKS-1) & (UTILTIMERTASK_TASKS-1))) {
       if (checkCallback(&utilTimerTasks[ptr], checkCallbackData)) {
         *task = utilTimerTasks[ptr];
-        jshInterruptOn();
+        jshInterruptOn(nested);
         return true;
       }
       ptr = (ptr+UTILTIMERTASK_TASKS-1) & (UTILTIMERTASK_TASKS-1);
     }
   }
-  jshInterruptOn();
+  jshInterruptOn(nested);
   return false;
 }
 
@@ -401,7 +401,7 @@ bool jstPinPWM(JsVarFloat freq, JsVarFloat dutyCycle, Pin pin) {
 
   // First, search for existing PWM tasks
   UtilTimerTask *ptaskon=0, *ptaskoff=0;
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   unsigned char ptr = utilTimerTasksHead;
   if (ptr != utilTimerTasksTail) {
     ptr = (ptr+UTILTIMERTASK_TASKS-1) & (UTILTIMERTASK_TASKS-1);
@@ -427,10 +427,10 @@ bool jstPinPWM(JsVarFloat freq, JsVarFloat dutyCycle, Pin pin) {
     /* don't bother rescheduling - everything will work out next time
      * the timer fires anyway. */
     // All done - just return!
-    jshInterruptOn();
+    jshInterruptOn(nested);
     return true;
   }
-  jshInterruptOn();
+  jshInterruptOn(nested);
 
   /// Remove any tasks using the given pin (if they existed)
   if (ptaskon || ptaskoff) {
@@ -493,12 +493,12 @@ bool jstSetWakeUp(JsSysTime period) {
 
   // work out if we're waiting for a timer,
   // and if so, when it's going to be
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   if (utilTimerTasksTail!=utilTimerTasksHead) {
     hasTimer = true;
     nextTime = utilTimerTasks[utilTimerTasksTail].time;
   }
-  jshInterruptOn();
+  jshInterruptOn(nested);
 
   if (hasTimer && (task.time-utilTimerTime) >= (nextTime-utilTimerTime)) {
     // we already had a timer, and it's going to wake us up sooner.
@@ -516,7 +516,7 @@ bool jstSetWakeUp(JsSysTime period) {
  * before the wakeup event */
 void jstClearWakeUp() {
   bool removedTimer = false;
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   // while the first item is a wakeup, remove it
   while (utilTimerTasksTail!=utilTimerTasksHead &&
       utilTimerTasks[utilTimerTasksTail].type == UET_WAKEUP) {
@@ -526,7 +526,7 @@ void jstClearWakeUp() {
   // if the queue is now empty, and we stop the timer
   if (utilTimerTasksTail==utilTimerTasksHead && removedTimer)
     jshUtilTimerDisable();
-  jshInterruptOn();
+  jshInterruptOn(nested);
 }
 
 #ifndef SAVE_ON_FLASH
@@ -595,13 +595,13 @@ void jstSystemTimeChanged(JsSysTime diff) {
 void jstDumpUtilityTimers() {
   int i;
   UtilTimerTask uTimerTasks[UTILTIMERTASK_TASKS];
-  jshInterruptOff();
+  uint8_t nested;jshInterruptOff(&nested);
   for (i=0;i<UTILTIMERTASK_TASKS;i++)
     uTimerTasks[i] = utilTimerTasks[i];
   unsigned char uTimerTasksHead = utilTimerTasksHead;
   unsigned char uTimerTasksTail = utilTimerTasksTail;
   int uTimerTime = utilTimerTime;
-  jshInterruptOn();
+  jshInterruptOn(nested);
 
   jsiConsolePrintf("Current timer difference %d us\n", (int)(1000*jshGetMillisecondsFromTime((int)jshGetSystemTime()-uTimerTime)));
   unsigned char t = uTimerTasksTail;

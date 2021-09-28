@@ -391,7 +391,8 @@ setTime((new Date("Tue, 19 Feb 2019 10:57")).getTime()/1000)
 To set the timezone for all new Dates, use `E.setTimeZone(hours)`.
  */
 void jswrap_interactive_setTime(JsVarFloat time) {
-  jshInterruptOff();
+  uint8_t nested;
+  jshInterruptOff(&nested);
   JsSysTime stime = jshGetTimeFromMilliseconds(time*1000);
   jsiLastIdleTime = stime;
   JsSysTime oldtime = jshGetSystemTime();
@@ -399,7 +400,7 @@ void jswrap_interactive_setTime(JsVarFloat time) {
   jshSetSystemTime(stime);
   // update any currently running timers so they don't get broken
   jstSystemTimeChanged(stime - oldtime);
-  jshInterruptOn();
+  jshInterruptOn(nested);
 }
 
 

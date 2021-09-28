@@ -392,7 +392,7 @@ void jswrap_spi_send4bit(JsVar *parent, JsVar *srcdata, int bit0, int bit1, Pin 
   if (jsvIsNumeric(srcdata)) {
     jsspiSend4bit(device, (unsigned char)jsvGetInteger(srcdata), bit0, bit1);
   } else if (jsvIsIterable(srcdata)) {
-    jshInterruptOff();
+    uint8_t nested;jshInterruptOff(&nested);
     JsvIterator it;
     jsvIteratorNew(&it, srcdata, JSIF_EVERY_ARRAY_ELEMENT);
     while (jsvIteratorHasElement(&it)) {
@@ -401,7 +401,7 @@ void jswrap_spi_send4bit(JsVar *parent, JsVar *srcdata, int bit0, int bit1, Pin 
       jsvIteratorNext(&it);
     }
     jsvIteratorFree(&it);
-    jshInterruptOn();
+    jshInterruptOn(nested);
   } else {
     jsExceptionHere(JSET_ERROR, "Variable type %t not suited to transmit operation", srcdata);
   }
@@ -461,7 +461,7 @@ void jswrap_spi_send8bit(JsVar *parent, JsVar *srcdata, int bit0, int bit1, Pin 
   if (jsvIsNumeric(srcdata)) {
     jsspiSend8bit(device, (unsigned char)jsvGetInteger(srcdata), bit0, bit1);
   } else if (jsvIsIterable(srcdata)) {
-    jshInterruptOff();
+    uint8_t nested;jshInterruptOff(&nested);
     JsvIterator it;
     jsvIteratorNew(&it, srcdata, JSIF_EVERY_ARRAY_ELEMENT);
     while (jsvIteratorHasElement(&it)) {
@@ -470,7 +470,7 @@ void jswrap_spi_send8bit(JsVar *parent, JsVar *srcdata, int bit0, int bit1, Pin 
       jsvIteratorNext(&it);
     }
     jsvIteratorFree(&it);
-    jshInterruptOn();
+    jshInterruptOn(nested);
   } else {
     jsExceptionHere(JSET_ERROR, "Variable type %t not suited to transmit operation", srcdata);
   }
