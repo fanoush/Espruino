@@ -256,6 +256,7 @@ ble_data_t m_scan_buffer = {
 JsVar *jsble_get_error_string(uint32_t err_code) {
   if (!err_code) return 0;
   const char *name = 0;
+#ifndef SAVE_ON_FLASH_ERRORMSG
   switch (err_code) {
    case NRF_ERROR_NO_MEM        : name="NO_MEM"; break;
    case NRF_ERROR_INVALID_PARAM : name="INVALID_PARAM"; break;
@@ -276,6 +277,7 @@ JsVar *jsble_get_error_string(uint32_t err_code) {
    case BLE_ERROR_NO_TX_PACKETS : name="NO_TX_PACKETS"; break;
 #endif
   }
+#endif
   if (name) return jsvVarPrintf("ERR 0x%x (%s)", err_code, name);
   else return jsvVarPrintf("ERR 0x%x", err_code);
 }
@@ -702,6 +704,7 @@ uint8_t match_request : 1;               If 1 requires the application to report
         JsVar *o = jsvNewObject();
         if (o) {
           const char *str=NULL;
+#ifndef SAVE_ON_FLASH_ERRORMSG
           switch(auth_status->auth_status) {
             case BLE_GAP_SEC_STATUS_SUCCESS                : str="SUCCESS";break;
             case BLE_GAP_SEC_STATUS_TIMEOUT                : str="TIMEOUT";break;
@@ -723,6 +726,7 @@ uint8_t match_request : 1;               If 1 requires the application to report
             case BLE_GAP_SEC_STATUS_BR_EDR_IN_PROG         : str="BR_EDR_IN_PROG";break;
             case BLE_GAP_SEC_STATUS_X_TRANS_KEY_DISALLOWED : str="X_TRANS_KEY_DISALLOWED";break;
           }
+#endif
           jsvObjectSetChildAndUnLock(o,"auth_status",str?jsvNewFromString(str):jsvNewFromInteger(auth_status->auth_status));
           jsvObjectSetChildAndUnLock(o, "bonded", jsvNewFromBool(auth_status->bonded));
           jsvObjectSetChildAndUnLock(o, "lv4", jsvNewFromInteger(auth_status->sm1_levels.lv4));
