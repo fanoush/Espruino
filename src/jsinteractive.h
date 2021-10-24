@@ -147,10 +147,16 @@ typedef enum {
   JSIS_IN_DEBUGGER        = 1<<3, ///< We're inside the debug loop
   JSIS_EXIT_DEBUGGER      = 1<<4, ///< we've been asked to exit the debug loop
 #endif
+#ifndef SAVE_ON_FLASH_SAVE
   JSIS_TODO_FLASH_SAVE    = 1<<5, ///< save to flash
+#endif
   JSIS_TODO_FLASH_LOAD    = 1<<6, ///< load from flash
   JSIS_TODO_RESET         = 1<<7, ///< reset the board, don't load anything
+#ifndef SAVE_ON_FLASH_SAVE
   JSIS_TODO_MASK = JSIS_TODO_FLASH_SAVE|JSIS_TODO_FLASH_LOAD|JSIS_TODO_RESET,
+#else
+  JSIS_TODO_MASK = JSIS_TODO_FLASH_LOAD|JSIS_TODO_RESET,
+#endif
   JSIS_CONSOLE_FORCED     = 1<<8, ///< see jsiSetConsoleDevice
   JSIS_WATCHDOG_AUTO      = 1<<9, ///< Automatically kick the watchdog timer on idle
   JSIS_PASSWORD_PROTECTED = 1<<10, ///< Password protected

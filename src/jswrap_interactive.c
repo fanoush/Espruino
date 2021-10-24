@@ -169,6 +169,12 @@ executed by Espruino every time it starts.
 from Storage after reset** in much the same way as calling `reset()` then `eval(require("Storage").read(filename))`
  */
 void jswrap_interface_load(JsVar *storageName) {
+#ifdef SAVE_ON_FLASH_SAVE
+  if (!jsvIsString(storageName) || jsvIsEmptyString(storageName)){
+    jsExceptionHere(JSET_ERROR, "File name required.");
+    return;
+  } 
+#endif
   jsiStatus |= JSIS_TODO_FLASH_LOAD;
   jsvObjectSetChild(execInfo.hiddenRoot,JSI_LOAD_CODE_NAME,storageName);
 }
@@ -178,7 +184,7 @@ void jswrap_interface_load(JsVar *storageName) {
   "type" : "function",
   "name" : "save",
   "generate_full" : "jsiStatus|=JSIS_TODO_FLASH_SAVE;",
-  "#if" : "!defined(BANGLEJS)"
+  "#if" : "!(defined(BANGLEJS) || defined(SAVE_ON_FLASH_SAVE))"
 }
 Save the state of the interpreter into flash (including the results of calling
 `setWatch`, `setInterval`, `pinMode`, and any listeners). The state will then be loaded automatically

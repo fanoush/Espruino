@@ -798,7 +798,9 @@ void jsiSemiInit(bool autoLoad) {
     jsiStatus &= ~JSIS_COMPLETELY_RESET; // loading code, remove this flag
     jspSoftKill();
     jsvSoftKill();
+#ifndef SAVE_ON_FLASH_SAVE
     jsfLoadStateFromFlash();
+#endif
     jsvSoftInit();
     jspSoftInit();
   }
@@ -2217,6 +2219,7 @@ void jsiIdle() {
       jsiSemiInit(false); // don't autoload
       jsiStatus &= (JsiStatus)~JSIS_TODO_RESET;
     }
+#ifndef SAVE_ON_FLASH_SAVE
     if ((s&JSIS_TODO_FLASH_SAVE) == JSIS_TODO_FLASH_SAVE) {
       jsvGarbageCollect(); // nice to have everything all tidy!
       jsiSoftKill();
@@ -2229,6 +2232,7 @@ void jsiIdle() {
       jsiSoftInit(false /* not been reset */);
       jsiStatus &= (JsiStatus)~JSIS_TODO_FLASH_SAVE;
     }
+#endif    
     if ((s&JSIS_TODO_FLASH_LOAD) == JSIS_TODO_FLASH_LOAD) {
       JsVar *filenameVar = jsvObjectGetChild(execInfo.hiddenRoot,JSI_LOAD_CODE_NAME,0);
       // TODO: why can't we follow the same steps here for both?
@@ -2247,6 +2251,7 @@ void jsiIdle() {
           jsvObjectSetChildAndUnLock(execInfo.root, "__FILE__", jsfVarFromName(filename));
           jsvUnLock2(jspEvaluateVar(code,0,0), code);
         }
+#ifndef SAVE_ON_FLASH_SAVE
       } else {
         jsiSoftKill();
         jspSoftKill();
@@ -2258,6 +2263,7 @@ void jsiIdle() {
         jsvSoftInit();
         jspSoftInit();
         jsiSoftInit(false /* not been reset */);
+#endif    
       }
       jsiStatus &= (JsiStatus)~JSIS_TODO_FLASH_LOAD;
     }

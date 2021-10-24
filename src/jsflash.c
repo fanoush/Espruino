@@ -19,7 +19,9 @@
 
 #define SAVED_CODE_BOOTCODE_RESET ".bootrst" // bootcode that runs even after reset
 #define SAVED_CODE_BOOTCODE ".bootcde" // bootcode that doesn't run after reset
+#ifndef SAVE_ON_FLASH_SAVE
 #define SAVED_CODE_VARIMAGE ".varimg" // Image of all JsVars written to flash
+#endif
 
 #define JSF_START_ADDRESS FLASH_SAVED_CODE_START
 #define JSF_END_ADDRESS (FLASH_SAVED_CODE_START+FLASH_SAVED_CODE_LENGTH)
@@ -748,6 +750,7 @@ JsVar *jsfListFiles(JsVar *regex, JsfFileFlags containing, JsfFileFlags notConta
 // ------------------------------------------------------------------------ For loading/saving code to flash
 // ------------------------------------------------------------------------------------------------
 // ------------------------------------------------------------------------------------------------
+#ifndef SAVE_ON_FLASH_SAVE
 
 // Get a hash of the current Git commit, so new builds won't load saved code
 static uint32_t getBuildHash() {
@@ -883,6 +886,7 @@ void jsfLoadStateFromFlash() {
   jsiConsolePrintf("Loading %d bytes from flash...\n", jsfGetFileSize(&header));
   DECOMPRESS(jsfLoadFromFlash_readcb, (uint32_t*)&cbData, varPtr);
 }
+#endif
 
 void jsfSaveBootCodeToFlash(JsVar *code, bool runAfterReset) {
   jsfEraseFile(jsfNameFromString(SAVED_CODE_BOOTCODE));
@@ -922,7 +926,9 @@ bool jsfLoadBootCodeFromFlash(bool isReset) {
 
 bool jsfFlashContainsCode() {
   return
+#ifndef SAVE_ON_FLASH_SAVE
       jsfFindFile(jsfNameFromString(SAVED_CODE_VARIMAGE),0) ||
+#endif
       jsfFindFile(jsfNameFromString(SAVED_CODE_BOOTCODE),0) ||
       jsfFindFile(jsfNameFromString(SAVED_CODE_BOOTCODE_RESET),0);
 }
@@ -930,7 +936,9 @@ bool jsfFlashContainsCode() {
 /** Completely clear any saved code from flash. */
 void jsfRemoveCodeFromFlash() {
   jsiConsolePrint("Erasing saved code.");
+#ifndef SAVE_ON_FLASH_SAVE
   jsfEraseFile(jsfNameFromString(SAVED_CODE_VARIMAGE));
+#endif
   jsfEraseFile(jsfNameFromString(SAVED_CODE_BOOTCODE));
   jsfEraseFile(jsfNameFromString(SAVED_CODE_BOOTCODE_RESET));
   jsiConsolePrint("\nDone!\n");
