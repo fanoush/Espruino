@@ -132,9 +132,9 @@ JsVar *jspeiGetTopScope() {
 }
 
 JsVar *jspFindPrototypeFor(const char *className) {
-  JsVar *obj = jsvObjectGetChild(execInfo.root, className, 0);
+  JsVar *obj = jsvObjectGetChildIfExists(execInfo.root, className);
   if (!obj) return 0;
-  JsVar *proto = jsvObjectGetChild(obj, JSPARSE_PROTOTYPE_VAR, 0);
+  JsVar *proto = jsvObjectGetChildIfExists(obj, JSPARSE_PROTOTYPE_VAR);
   jsvUnLock(obj);
   return proto;
 }
@@ -144,7 +144,7 @@ JsVar *jspFindPrototypeFor(const char *className) {
 JsVar *jspeiFindChildFromStringInParents(JsVar *parent, const char *name) {
   if (jsvIsObject(parent)) {
     // If an object, look for an 'inherits' var
-    JsVar *inheritsFrom = jsvObjectGetChild(parent, JSPARSE_INHERITS_VAR, 0);
+    JsVar *inheritsFrom = jsvObjectGetChildIfExists(parent, JSPARSE_INHERITS_VAR);
 
     // if there's no inheritsFrom, just default to 'Object.prototype'
     if (!inheritsFrom)
@@ -170,7 +170,7 @@ JsVar *jspeiFindChildFromStringInParents(JsVar *parent, const char *name) {
         // could be something the user has made - eg. 'Array=1'
         if (jsvHasChildren(obj)) {
           // We have found an object with this name - search for the prototype var
-          JsVar *proto = jsvObjectGetChild(obj, JSPARSE_PROTOTYPE_VAR, 0);
+          JsVar *proto = jsvObjectGetChildIfExists(obj, JSPARSE_PROTOTYPE_VAR);
           if (proto) {
             result = jsvFindChildFromString(proto, name, false);
             jsvUnLock(proto);
@@ -352,7 +352,7 @@ NO_INLINE bool jspeFunctionDefinitionInternal(JsVar *funcVar, bool expressionOnl
         // save start position so if we fail we go back to a normal function parse
         JsVar *funcCodeVar = jsjParseFunction();
         if (jsvIsFlatString(funcCodeVar)) { // compilation could have failed!
-          jsvUnLock2(jsvAddNamedChild(funcVar, funcCodeVar, JSPARSE_FUNCTION_JIT_CODE_NAME), funcCodeVar);
+          jsvAddNamedChildAndUnLock(funcVar, funcCodeVar, JSPARSE_FUNCTION_JIT_CODE_NAME);
           JSP_MATCH('}');
           jslCharPosFree(&funcCodeStart);
           return true;
@@ -431,18 +431,18 @@ NO_INLINE bool jspeFunctionDefinitionInternal(JsVar *funcVar, bool expressionOnl
         funcCodeVar = jslNewStringFromLexer(&funcBegin, (size_t)lastTokenEnd);
       }
     }
-    jsvUnLock2(jsvAddNamedChild(funcVar, funcCodeVar, JSPARSE_FUNCTION_CODE_NAME), funcCodeVar);
+    jsvAddNamedChildAndUnLock(funcVar, funcCodeVar, JSPARSE_FUNCTION_CODE_NAME);
     // scope var
     JsVar *funcScopeVar = jspeiGetScopesAsVar();
     if (funcScopeVar) {
-      jsvUnLock2(jsvAddNamedChild(funcVar, funcScopeVar, JSPARSE_FUNCTION_SCOPE_NAME), funcScopeVar);
+      jsvAddNamedChildAndUnLock(funcVar, funcScopeVar, JSPARSE_FUNCTION_SCOPE_NAME);
     }
 #ifndef ESPR_NO_LINE_NUMBERS
     // If we've got a line number, add a var for it
     if (lineNumber) {
       JsVar *funcLineNumber = jsvNewFromInteger(lineNumber);
       if (funcLineNumber) {
-        jsvUnLock2(jsvAddNamedChild(funcVar, funcLineNumber, JSPARSE_FUNCTION_LINENUMBER_NAME), funcLineNumber);
+        jsvAddNamedChildAndUnLock(funcVar, funcLineNumber, JSPARSE_FUNCTION_LINENUMBER_NAME);
       }
     }
 #endif
@@ -611,7 +611,7 @@ NO_INLINE JsVar *jspeFunctionCall(JsVar *function, JsVar *functionName, JsVar *t
           if (lex->tk!=')') JSP_MATCH_WITH_CLEANUP_AND_RETURN(',',jsvUnLockMany((unsigned)argCount, argPtr);jsvUnLock(thisVar);, 0);
         }
 
-        JSP_MATCH(')');
+        JSP_MATCH_WITH_CLEANUP_AND_RETURN(')',jsvUnLockMany((unsigned)argCount, argPtr);jsvUnLock(thisVar);, 0);
         allocatedArgCount = argCount;
       }
 
@@ -1175,8 +1175,7 @@ NO_INLINE JsVar *jspeConstruct(JsVar *func, JsVar *funcName, bool hasArgs) {
   // Make sure the function has a 'prototype' var
   JsVar *prototypeName = jsvFindChildFromString(func, JSPARSE_PROTOTYPE_VAR, true);
   jspEnsureIsPrototype(func, prototypeName); // make sure it's an object
-  JsVar *prototypeVar = jsvSkipName(prototypeName);
-  jsvUnLock3(jsvAddNamedChild(thisObj, prototypeVar, JSPARSE_INHERITS_VAR), prototypeVar, prototypeName);
+  jsvAddNamedChildAndUnLock(thisObj, jsvSkipNameAndUnLock(prototypeName), JSPARSE_INHERITS_VAR);
 
   JsVar *a = jspeFunctionCall(func, funcName, thisObj, hasArgs, 0, 0);
 
@@ -1237,12 +1236,12 @@ NO_INLINE JsVar *jspeFactorFunctionCall() {
         // If we're doing super() we want the constructor. We have to be careful
         // we don't keep asking for the same one so don't get it from 'this' which has to be the
         // same each time https://github.com/espruino/Espruino/issues/1529
-        proto1 = jsvObjectGetChild(execInfo.currentClassConstructor, JSPARSE_PROTOTYPE_VAR, 0);
+        proto1 = jsvObjectGetChildIfExists(execInfo.currentClassConstructor, JSPARSE_PROTOTYPE_VAR);
       } else {
-        proto1 = jsvObjectGetChild(execInfo.thisVar, JSPARSE_INHERITS_VAR, 0); // if we're in a method, get __proto__ first
+        proto1 = jsvObjectGetChildIfExists(execInfo.thisVar, JSPARSE_INHERITS_VAR); // if we're in a method, get __proto__ first
 
       }
-      JsVar *proto2 = jsvIsObject(proto1) ? jsvObjectGetChild(proto1, JSPARSE_INHERITS_VAR, 0) : 0; // still in method, get __proto__.__proto__
+      JsVar *proto2 = jsvIsObject(proto1) ? jsvObjectGetChildIfExists(proto1, JSPARSE_INHERITS_VAR) : 0; // still in method, get __proto__.__proto__
       jsvUnLock(proto1);
       if (!proto2) {
         jsExceptionHere(JSET_SYNTAXERROR, "Calling 'super' outside of class");
@@ -1250,7 +1249,7 @@ NO_INLINE JsVar *jspeFactorFunctionCall() {
       }
       // If we're doing super() we want the constructor
       if (lex->tk=='(') {
-        JsVar *constr = jsvObjectGetChild(proto2, JSPARSE_CONSTRUCTOR_VAR, 0);
+        JsVar *constr = jsvObjectGetChildIfExists(proto2, JSPARSE_CONSTRUCTOR_VAR);
         jsvUnLock(proto2);
         execInfo.currentClassConstructor = constr;
         hasSetCurrentClassConstructor = true;
@@ -1261,14 +1260,14 @@ NO_INLINE JsVar *jspeFactorFunctionCall() {
       }
     } else if (jsvIsFunction(execInfo.thisVar)) {
       // 'this' is a function - must be calling a static method
-      JsVar *proto1 = jsvObjectGetChild(execInfo.thisVar, JSPARSE_PROTOTYPE_VAR, 0);
-      JsVar *proto2 = jsvIsObject(proto1) ? jsvObjectGetChild(proto1, JSPARSE_INHERITS_VAR, 0) : 0;
+      JsVar *proto1 = jsvObjectGetChildIfExists(execInfo.thisVar, JSPARSE_PROTOTYPE_VAR);
+      JsVar *proto2 = jsvIsObject(proto1) ? jsvObjectGetChildIfExists(proto1, JSPARSE_INHERITS_VAR) : 0;
       jsvUnLock(proto1);
       if (!proto2) {
         jsExceptionHere(JSET_SYNTAXERROR, "Calling 'super' outside of class");
         return 0;
       }
-      JsVar *constr = jsvObjectGetChild(proto2, JSPARSE_CONSTRUCTOR_VAR, 0);
+      JsVar *constr = jsvObjectGetChildIfExists(proto2, JSPARSE_CONSTRUCTOR_VAR);
       jsvUnLock(proto2);
       a = constr;
     } else {
@@ -1601,9 +1600,11 @@ NO_INLINE JsVar *jspeAddNamedFunctionParameter(JsVar *funcVar, JsVar *name) {
 #ifndef ESPR_NO_ARROW_FN
 // parse an arrow function
 NO_INLINE JsVar *jspeArrowFunction(JsVar *funcVar, JsVar *a) {
-  assert(!a || jsvIsName(a));
   JSP_ASSERT_MATCH(LEX_ARROW_FUNCTION);
-  funcVar = jspeAddNamedFunctionParameter(funcVar, a);
+  if (JSP_SHOULD_EXECUTE) {
+    assert(!a || jsvIsName(a));
+    funcVar = jspeAddNamedFunctionParameter(funcVar, a);
+  }
 
   bool expressionOnly = lex->tk!='{';
   bool fnIncludesThis = jspeFunctionDefinitionInternal(funcVar, expressionOnly);
@@ -1663,7 +1664,7 @@ NO_INLINE JsVar *jspeClassDefinition(bool parseNamedClass) {
     classFunction = jsvNewWithFlags(JSV_FUNCTION);
     JsVar *scopeVar = jspeiGetScopesAsVar();
     if (scopeVar)
-      jsvUnLock2(jsvAddNamedChild(classFunction, scopeVar, JSPARSE_FUNCTION_SCOPE_NAME), scopeVar);
+      jsvAddNamedChildAndUnLock(classFunction, scopeVar, JSPARSE_FUNCTION_SCOPE_NAME);
   }
 
   if (parseNamedClass && lex->tk==LEX_ID) {
@@ -1688,7 +1689,7 @@ NO_INLINE JsVar *jspeClassDefinition(bool parseNamedClass) {
     JSP_MATCH_WITH_CLEANUP_AND_RETURN(LEX_ID,jsvUnLock4(extendsFrom,classFunction,classInternalName,classPrototype),0);
     if (classPrototype) {
       if (jsvIsFunction(extendsFrom)) {
-        JsVar *extendsFromProto = jsvObjectGetChild(extendsFrom, JSPARSE_PROTOTYPE_VAR, 0);
+        JsVar *extendsFromProto = jsvObjectGetChildIfExists(extendsFrom, JSPARSE_PROTOTYPE_VAR);
         if (extendsFromProto) {
           jsvObjectSetChild(classPrototype, JSPARSE_INHERITS_VAR, extendsFromProto);
           // link in default constructor if ours isn't supplied
@@ -2062,16 +2063,16 @@ NO_INLINE JsVar *__jspeBinaryExpression(JsVar *a, unsigned int lastPrecedence) {
           } else {
             if (jsvIsObject(av) || jsvIsFunction(av)) {
               JsVar *bproto = jspGetNamedField(bv, JSPARSE_PROTOTYPE_VAR, false);
-              JsVar *proto = jsvObjectGetChild(av, JSPARSE_INHERITS_VAR, 0);
-              while (proto) {
+              JsVar *proto = jsvObjectGetChildIfExists(av, JSPARSE_INHERITS_VAR);
+              while (jsvHasChildren(proto)) { // proto could have been set to anything (null/number/etc) #2363
                 if (proto == bproto) inst=true;
                 // search prototype chain
-                JsVar *childProto = jsvObjectGetChild(proto, JSPARSE_INHERITS_VAR, 0);
+                JsVar *childProto = jsvObjectGetChildIfExists(proto, JSPARSE_INHERITS_VAR);
                 jsvUnLock(proto);
                 proto = childProto;
               }
               if (jspIsConstructor(bv, "Object")) inst = true;
-              jsvUnLock(bproto);
+              jsvUnLock2(bproto, proto);
             }
             if (!inst) {
               const char *name = jswGetBasicObjectName(av);
@@ -2646,7 +2647,8 @@ NO_INLINE JsVar *jspeStatementFor() {
           bool ignore = false;
           if (checkerFunction && checkerFunction(loopIndexVar)) {
             ignore = true;
-            if (jsvIsString(loopIndexVar) &&
+            if (!isForOf &&
+                jsvIsString(loopIndexVar) &&
                 jsvIsStringEqual(loopIndexVar, JSPARSE_INHERITS_VAR))
               foundPrototype = jsvSkipName(loopIndexVar);
           }
@@ -2655,9 +2657,7 @@ NO_INLINE JsVar *jspeStatementFor() {
             if (isForOf) { // for (... of ...)
               iteratorValue = jsvIteratorGetValue(&it);
             } else { // for (... in ...)
-              iteratorValue = jsvIsName(loopIndexVar) ?
-                  jsvCopyNameOnly(loopIndexVar, false/*no copy children*/, false/*not a name*/) :
-                  loopIndexVar;
+              iteratorValue = jsvAsString(loopIndexVar);
               assert(jsvGetRefs(iteratorValue)==0);
             }
             if (isForOf || iteratorValue) { // could be out of memory
@@ -2666,7 +2666,7 @@ NO_INLINE JsVar *jspeStatementFor() {
               if (startsWithConst) forStatement->flags &= ~JSV_CONSTANT; // for (const i in [1,2,3]) has to work
               jsvReplaceWithOrAddToRoot(forStatement, iteratorValue);
               if (startsWithConst) forStatement->flags |= JSV_CONSTANT;
-              if (iteratorValue!=loopIndexVar) jsvUnLock(iteratorValue);
+              jsvUnLock(iteratorValue);
 
               jslSeekToP(&forBodyStart);
               execInfo.execute |= EXEC_IN_LOOP;
@@ -2690,6 +2690,7 @@ NO_INLINE JsVar *jspeStatementFor() {
           }
         }
         assert(!foundPrototype);
+        jsvUnLock(foundPrototype); // just in case...
         jsvIteratorFree(&it);
       } else if (!jsvIsUndefined(array)) {
         jsExceptionHere(JSET_ERROR, "FOR loop can only iterate over Arrays, Strings or Objects, not %t", array);
@@ -3090,8 +3091,7 @@ NO_INLINE JsVar *jspNewObject(const char *name, const char *instanceOf) {
   }
 #endif
   // add __proto__
-  JsVar *prototypeVar = jsvSkipName(prototypeName);
-  jsvUnLock3(jsvAddNamedChild(obj, prototypeVar, JSPARSE_INHERITS_VAR), prototypeVar, prototypeName);prototypeName=0;
+  jsvAddNamedChildAndUnLock(obj, jsvSkipNameAndUnLock(prototypeName), JSPARSE_INHERITS_VAR);
 
   if (name) {
     JsVar *objName = jsvFindChildFromString(execInfo.root, name, true);
@@ -3108,7 +3108,7 @@ NO_INLINE JsVar *jspNewObject(const char *name, const char *instanceOf) {
 /** Returns true if the constructor function given is the same as that
  * of the object with the given name. */
 bool jspIsConstructor(JsVar *constructor, const char *constructorName) {
-  JsVar *objFunc = jsvObjectGetChild(execInfo.root, constructorName, 0);
+  JsVar *objFunc = jsvObjectGetChildIfExists(execInfo.root, constructorName);
   if (!objFunc) return false;
   bool isConstructor = objFunc == constructor;
   jsvUnLock(objFunc);
@@ -3118,7 +3118,7 @@ bool jspIsConstructor(JsVar *constructor, const char *constructorName) {
 /** Get the prototype of the given object, or return 0 if not found, or not an object */
 JsVar *jspGetPrototype(JsVar *object) {
   if (!jsvIsObject(object)) return 0;
-  JsVar *proto = jsvObjectGetChild(object, JSPARSE_INHERITS_VAR, 0);
+  JsVar *proto = jsvObjectGetChildIfExists(object, JSPARSE_INHERITS_VAR);
   if (jsvIsObject(proto))
     return proto;
   jsvUnLock(proto);
@@ -3129,7 +3129,7 @@ JsVar *jspGetPrototype(JsVar *object) {
 JsVar *jspGetConstructor(JsVar *object) {
   JsVar *proto = jspGetPrototype(object);
   if (proto) {
-    JsVar *constr = jsvObjectGetChild(proto, JSPARSE_CONSTRUCTOR_VAR, 0);
+    JsVar *constr = jsvObjectGetChildIfExists(proto, JSPARSE_CONSTRUCTOR_VAR);
     if (jsvIsFunction(constr)) {
       jsvUnLock(proto);
       return constr;
@@ -3291,7 +3291,7 @@ JsVar *jspExecuteFunction(JsVar *func, JsVar *thisArg, int argCount, JsVar **arg
 JsVar *jspEvaluateModule(JsVar *moduleContents) {
   assert(jsvIsString(moduleContents) || jsvIsFunction(moduleContents));
   if (jsvIsFunction(moduleContents)) {
-    moduleContents = jsvObjectGetChild(moduleContents,JSPARSE_FUNCTION_CODE_NAME,0);
+    moduleContents = jsvObjectGetChildIfExists(moduleContents,JSPARSE_FUNCTION_CODE_NAME);
     if (!jsvIsString(moduleContents)) {
       jsvUnLock(moduleContents);
       return 0;
@@ -3331,7 +3331,7 @@ JsVar *jspEvaluateModule(JsVar *moduleContents) {
  * non-prototypes and non-objects.  */
 JsVar *jspGetPrototypeOwner(JsVar *proto) {
   if (jsvIsObject(proto) || jsvIsArray(proto)) {
-    return jsvSkipNameAndUnLock(jsvObjectGetChild(proto, JSPARSE_CONSTRUCTOR_VAR, 0));
+    return jsvSkipNameAndUnLock(jsvObjectGetChildIfExists(proto, JSPARSE_CONSTRUCTOR_VAR));
   }
   return 0;
 }

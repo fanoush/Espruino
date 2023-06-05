@@ -76,16 +76,16 @@ void jswrap_trig_setup(Pin pin, JsVar *options) {
   JsVarFloat minRPM = 30;
   if (jsvIsObject(options)) {
     JsVar *v;
-    v = jsvObjectGetChild(options, "teethMissing", 0);
+    v = jsvObjectGetChildIfExists(options, "teethMissing");
     if (!jsvIsUndefined(v)) trig->teethMissing = (unsigned char)jsvGetInteger(v);
     jsvUnLock(v);
-    v = jsvObjectGetChild(options, "teethTotal", 0);
+    v = jsvObjectGetChildIfExists(options, "teethTotal");
     if (!jsvIsUndefined(v)) trig->teethTotal = (unsigned char)jsvGetInteger(v);
     jsvUnLock(v);
-    v = jsvObjectGetChild(options, "minRPM", 0);
+    v = jsvObjectGetChildIfExists(options, "minRPM");
     if (!jsvIsUndefined(v)) minRPM = jsvGetFloat(v);
     jsvUnLock(v);
-    v = jsvObjectGetChild(options, "keyPosition", 0);
+    v = jsvObjectGetChildIfExists(options, "keyPosition");
     if (!jsvIsUndefined(v)) trig->keyPosition = jsvGetFloat(v);
     jsvUnLock(v);
   }
@@ -210,12 +210,9 @@ JsVar *jswrap_trig_getTrigger(JsVarInt num) {
 
   JsVar *obj = jsvNewObject();
   if (!obj) return 0;
-  JsVar *v;
-  v = jsvNewFromFloat(position);
-  jsvUnLock2(jsvAddNamedChild(obj, v, "pos"), v);
-  v = jsvNewFromFloat(jshGetMillisecondsFromTime(tp->pulseLength));
-  jsvUnLock2(jsvAddNamedChild(obj, v, "pulseLength"), v);
-  v = jsvNewEmptyArray();
+  jsvAddNamedChildAndUnLock(obj, jsvNewFromFloat(position), "pos");
+  jsvAddNamedChildAndUnLock(obj, jsvNewFromFloat(jshGetMillisecondsFromTime(tp->pulseLength)), "pulseLength");
+  JsVar *v = jsvNewEmptyArray();
   int i;
   if (v) {
     for (i=0;i<TRIGGERPOINT_TRIGGERS_COUNT;i++)
@@ -223,7 +220,7 @@ JsVar *jswrap_trig_getTrigger(JsVarInt num) {
         jsvArrayPushAndUnLock(v, jsvNewFromPin(tp->pins[i]));
       }
   }
-  jsvUnLock2(jsvAddNamedChild(obj, v, "pins"), v);
+  jsvAddNamedChildAndUnLock(obj, v, "pins");
   return obj;
 }
 

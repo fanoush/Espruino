@@ -121,7 +121,7 @@ unsigned char jsvGetLocks(JsVar *v) { return (unsigned char)((v->flags>>JSV_LOCK
 #define JSV_IS_NONAPPENDABLE_STRING(f) (JSV_IS_FLAT_STRING(f) || JSV_IS_NATIVE_STRING(f) || JSV_IS_FLASH_STRING(f))
 
 bool jsvIsRoot(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_ROOT(f); }
-bool jsvIsPin(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_PIN(f); }
+bool jsvIsPin(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; NOT_USED(f); return JSV_IS_PIN(f); } // NOT_USED(f) avoids compile warnings for some builds
 bool jsvIsSimpleInt(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)==JSV_INTEGER; } // is just a very basic integer value
 bool jsvIsInt(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_INT(f); }
 bool jsvIsFloat(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)==JSV_FLOAT; }
@@ -131,7 +131,7 @@ bool jsvIsBasicString(const JsVar *v) { if (!v) return false; char f = v->flags&
 bool jsvIsStringExt(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_STRING_EXT(f); } ///< The extra bits dumped onto the end of a string to store more data
 bool jsvIsFlatString(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_FLAT_STRING(f); }
 bool jsvIsNativeString(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_NATIVE_STRING(f); }
-bool jsvIsFlashString(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; return JSV_IS_FLASH_STRING(f); }
+bool jsvIsFlashString(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK; NOT_USED(f); return JSV_IS_FLASH_STRING(f); } // NOT_USED(f) avoids compile warnings for some builds
 bool jsvIsConstant(const JsVar *v) { return v && (v->flags&JSV_CONSTANT)==JSV_CONSTANT; }
 bool jsvIsNumeric(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK;  return f>=_JSV_NUMERIC_START && f<=_JSV_NUMERIC_END; }
 bool jsvIsFunction(const JsVar *v) { if (!v) return false; char f = v->flags&JSV_VARTYPEMASK;  return JSV_IS_FUNCTION(f); }
@@ -165,8 +165,8 @@ bool jsvIsRefUsedForData(const JsVar *v) {
 }
 
 /// Can the given variable be converted into an integer without loss of precision
-bool jsvIsIntegerish(const JsVar *v) {  
-  //return jsvIsInt(v) || jsvIsPin(v) || jsvIsBoolean(v) || jsvIsNull(v); 
+bool jsvIsIntegerish(const JsVar *v) {
+  //return jsvIsInt(v) || jsvIsPin(v) || jsvIsBoolean(v) || jsvIsNull(v);
   if (!v) return false;
   char f = v->flags&JSV_VARTYPEMASK;
   return JSV_IS_INT(f) || JSV_IS_PIN(f) || JSV_IS_BOOL(f) || JSV_IS_NULL(f);
@@ -323,7 +323,8 @@ static JsVarRef jsvInitJsVars(JsVarRef start, unsigned int count) {
 
 void jsvInit(unsigned int size) {
 #ifdef RESIZABLE_JSVARS
-  assert(size==0);
+  // ignore size here - we're always going to start off at our smallest size
+  NOT_USED(size);
   jsVarsSize = JSVAR_BLOCK_SIZE;
   jsVarBlocks = malloc(sizeof(JsVar*)); // just 1
 #if defined(ESPR_JIT) && defined(LINUX)
@@ -343,7 +344,7 @@ void jsvInit(unsigned int size) {
   if(!jsVars) jsVars = (JsVar *)malloc(sizeof(JsVar) * jsVarsSize);
 #endif
 #else
-  assert(size==0);
+  assert(size==JSVAR_CACHE_SIZE);
 #endif
 
   jsVarFirstEmpty = jsvInitJsVars(1/*first*/, jsVarsSize);
@@ -491,7 +492,8 @@ size_t jsvGetCharactersInVar(const JsVar *v) {
   unsigned int f = v->flags&JSV_VARTYPEMASK;
   if (f == JSV_FLAT_STRING)
     return (size_t)v->varData.integer;
-  if ((f == JSV_NATIVE_STRING)
+  if (false
+  || (f == JSV_NATIVE_STRING)
 #ifdef SPIFLASH_BASE
   || (f == JSV_FLASH_STRING)
 #endif
@@ -1222,7 +1224,7 @@ JsVar *jsvMakeIntoVariableName(JsVar *var, JsVar *valueOrZero) {
 
       // fill queue
       jsvStringIteratorNew(&it, var, JSVAR_DATA_STRING_NAME_LEN);
-      for (index = 0; index < sizeof(queue) && jsvStringIteratorHasChar(&it); index++) {
+      for (index = 0; index < (int)sizeof(queue) && jsvStringIteratorHasChar(&it); index++) {
         queue[index] = jsvStringIteratorGetCharAndNext(&it);
       }
       jsvStringIteratorFree(&it);
@@ -1939,7 +1941,7 @@ bool jsvIsStringNumericInt(const JsVar *var, bool allowDecimalPoint) {
     buf[1] = jsvStringIteratorGetChar(&it);
     buf[2] = 0;
     const char *p = buf;
-    radix = getRadix(&p,0);
+    radix = getRadix(&p);
     if (p>&buf[1]) jsvStringIteratorNext(&it);
   }
   if (radix==0) radix=10;
@@ -2123,7 +2125,7 @@ bool jsvGetBoolAndUnLock(JsVar *v) { return _jsvGetBoolAndUnLock(v); }
 JsVar *jsvExecuteGetter(JsVar *parent, JsVar *getset) {
   assert(jsvIsGetterOrSetter(getset));
   if (!jsvIsGetterOrSetter(getset)) return 0; // wasn't an object?
-  JsVar *fn = jsvObjectGetChild(getset, "get", 0);
+  JsVar *fn = jsvObjectGetChildIfExists(getset, "get");
   if (!jsvIsFunction(fn)) {
     jsvUnLock(fn);
     return 0;
@@ -2137,7 +2139,7 @@ JsVar *jsvExecuteGetter(JsVar *parent, JsVar *getset) {
 void jsvExecuteSetter(JsVar *parent, JsVar *getset, JsVar *value) {
   assert(jsvIsGetterOrSetter(getset));
   if (!jsvIsGetterOrSetter(getset)) return; // wasn't an object?
-  JsVar *fn = jsvObjectGetChild(getset, "set", 0);
+  JsVar *fn = jsvObjectGetChildIfExists(getset, "set");
   if (!jsvIsFunction(fn)) {
     jsvUnLock(fn);
     return;
@@ -2757,6 +2759,10 @@ JsVar *jsvAddNamedChild(JsVar *parent, JsVar *value, const char *name) {
   return namedChild;
 }
 
+void jsvAddNamedChildAndUnLock(JsVar *parent, JsVar *value, const char *name) {
+  jsvUnLock2(jsvAddNamedChild(parent, value, name), value);
+}
+
 JsVar *jsvSetValueOfName(JsVar *name, JsVar *src) {
   assert(name && jsvIsName(name));
   assert(name!=src); // no infinite loops!
@@ -3006,6 +3012,13 @@ JsVar *jsvObjectGetChild(JsVar *obj, const char *name, JsVarFlags createChild) {
   }
   jsvUnLock(childName);
   return child;
+}
+
+/// Get the named child of an object, or return 0
+JsVar *jsvObjectGetChildIfExists(JsVar *obj, const char *name) {
+  if (!obj) return 0;
+  assert(jsvHasChildren(obj));
+  return jsvSkipNameAndUnLock(jsvFindChildFromString(obj, name, 0));
 }
 
 /// Get the named child of an object using a case-insensitive search
@@ -4049,6 +4062,7 @@ int jsvGarbageCollect() {
   return (int)freedCount;
 }
 
+#ifndef SAVE_ON_FLASH
 void jsvDefragment() {
   // garbage collect - removes cruft
   // also puts free list in order
@@ -4128,6 +4142,7 @@ void jsvDefragment() {
   jsvCreateEmptyVarList();
   jshInterruptOn();
 }
+#endif
 
 // Dump any locked variables that aren't referenced from `global` - for debugging memory leaks
 void jsvDumpLockedVars() {
@@ -4321,9 +4336,9 @@ JsVar *jsvCreateConfigObject(jsvConfigObject *configs, int nConfigs) {
 bool jsvIsInstanceOf(JsVar *var, const char *constructorName) {
   bool isInst = false;
   if (!jsvHasChildren(var)) return false;
-  JsVar *proto = jsvObjectGetChild(var, JSPARSE_INHERITS_VAR, 0);
+  JsVar *proto = jsvObjectGetChildIfExists(var, JSPARSE_INHERITS_VAR);
   if (jsvIsObject(proto)) {
-    JsVar *constr = jsvObjectGetChild(proto, JSPARSE_CONSTRUCTOR_VAR, 0);
+    JsVar *constr = jsvObjectGetChildIfExists(proto, JSPARSE_CONSTRUCTOR_VAR);
     if (constr)
       isInst = jspIsConstructor(constr, constructorName);
     jsvUnLock(constr);

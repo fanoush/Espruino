@@ -36,6 +36,7 @@ JsVar *jswrap_espruino_getErrorFlags();
 JsVar *jswrap_espruino_toArrayBuffer(JsVar *str);
 JsVar *jswrap_espruino_toUint8Array(JsVar *args);
 JsVar *jswrap_espruino_toString(JsVar *args);
+JsVar *jswrap_espruino_toFlatString(JsVar *args);
 JsVar *jswrap_espruino_toJS(JsVar *v);
 JsVar *jswrap_espruino_memoryArea(int addr, int len);
 void jswrap_espruino_setBootCode(JsVar *code, bool alwaysExec);
@@ -74,5 +75,6 @@ JsVarInt jswrap_espruino_getBattery();
 void jswrap_espruino_setRTCPrescaler(int prescale);
 int jswrap_espruino_getRTCPrescaler(bool calibrate);
 JsVar *jswrap_espruino_decodeUTF8(JsVar *str, JsVar *lookup, JsVar *replaceFn);
+void jswrap_espruino_stopEventPropagation();
 
 #endif // JSWRAP_ESPRUINO_H_

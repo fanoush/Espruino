@@ -220,7 +220,7 @@ void jswrap_object_keys_or_property_names_cb(
         /* Not sure why constructor is included in getOwnPropertyNames, but
          * not in for (i in ...) but it is, so we must explicitly override the
          * check in jsvIsInternalObjectKey! */
-        JsVar *name = jsvAsArrayIndexAndUnLock(jsvCopyNameOnly(key, false, false));
+        JsVar *name = jsvAsStringAndUnLock(jsvCopyNameOnly(key, false, false));
         if (name) {
           callback(data, name);
           jsvUnLock(name);
@@ -253,7 +253,7 @@ void jswrap_object_keys_or_property_names_cb(
     if (flags & JSWOKPF_INCLUDE_PROTOTYPE) {
       JsVar *proto = 0;
       if (jsvIsObject(obj) || jsvIsFunction(obj)) {
-        proto = jsvObjectGetChild(obj, JSPARSE_INHERITS_VAR, 0);
+        proto = jsvObjectGetChildIfExists(obj, JSPARSE_INHERITS_VAR);
       }
 
       if (jsvIsObject(proto)) {
@@ -460,8 +460,8 @@ JsVar *jswrap_object_getOwnPropertyDescriptor(JsVar *parent, JsVar *name) {
 #ifndef ESPR_NO_GET_SET
   JsVar *getset = jsvGetValueOfName(varName);
   if (jsvIsGetterOrSetter(getset)) {
-    jsvObjectSetChildAndUnLock(obj, "get", jsvObjectGetChild(getset,"get",0));
-    jsvObjectSetChildAndUnLock(obj, "set", jsvObjectGetChild(getset,"set",0));
+    jsvObjectSetChildAndUnLock(obj, "get", jsvObjectGetChildIfExists(getset,"get"));
+    jsvObjectSetChildAndUnLock(obj, "set", jsvObjectGetChildIfExists(getset,"set"));
   } else {
 #endif
     jsvObjectSetChildAndUnLock(obj, "value", jsvSkipName(varName));
@@ -607,8 +607,8 @@ JsVar *jswrap_object_defineProperty(JsVar *parent, JsVar *propName, JsVar *desc)
   JsVar *name = jsvAsArrayIndex(propName);
   JsVar *value = 0;
 
-  JsVar *getter = jsvObjectGetChild(desc, "get", 0);
-  JsVar *setter = jsvObjectGetChild(desc, "set", 0);
+  JsVar *getter = jsvObjectGetChildIfExists(desc, "get");
+  JsVar *setter = jsvObjectGetChildIfExists(desc, "set");
   if (getter || setter) {
 #ifdef SAVE_ON_FLASH
     jsExceptionHere(JSET_ERROR, "get/set unsupported in this build");
@@ -622,10 +622,10 @@ JsVar *jswrap_object_defineProperty(JsVar *parent, JsVar *propName, JsVar *desc)
 #endif
     jsvUnLock2(getter,setter);
   }
-  if (!value) value = jsvObjectGetChild(desc, "value", 0);
+  if (!value) value = jsvObjectGetChildIfExists(desc, "value");
 
   jsvObjectSetChildVar(parent, name, value);
-  JsVar *writable = jsvObjectGetChild(desc, "writable", 0);
+  JsVar *writable = jsvObjectGetChildIfExists(desc, "writable");
   if (!jsvIsUndefined(writable) && !jsvGetBoolAndUnLock(writable))
     name->flags |= JSV_CONSTANT;
 
@@ -830,9 +830,13 @@ o.removeAllListeners('answer')
 o.emit('answer', 44);
 // nothing printed
 ```
+
+If you have more than one handler for an event, and you'd
+like that handler to stop the event being passed to other handlers
+then you can call `E.stopEventPropagation()` in that handler.
  */
-void jswrap_object_on(JsVar *parent, JsVar *event, JsVar *listener) {
 #ifndef ESPR_EMBED
+void jswrap_object_on(JsVar *parent, JsVar *event, JsVar *listener) {
   if (!jsvHasChildren(parent)) {
     jsExceptionHere(JSET_TYPEERROR, "Parent must be an object - not a String, Integer, etc.");
     return;
@@ -872,15 +876,15 @@ void jswrap_object_on(JsVar *parent, JsVar *event, JsVar *listener) {
   /* Special case if we're a data listener and data has already arrived then
    * we queue an event immediately. */
   if (jsvIsStringEqual(event, "data")) {
-    JsVar *buf = jsvObjectGetChild(parent, STREAM_BUFFER_NAME, 0);
+    JsVar *buf = jsvObjectGetChildIfExists(parent, STREAM_BUFFER_NAME);
     if (jsvIsString(buf)) {
       jsiQueueObjectCallbacks(parent, STREAM_CALLBACK_NAME, &buf, 1);
       jsvObjectRemoveChild(parent, STREAM_BUFFER_NAME);
     }
     jsvUnLock(buf);
   }
-#endif
 }
+#endif
 
 /*JSON{
   "type" : "method",
@@ -898,8 +902,8 @@ instance `obj.emit('data', 'Foo')`.
 
 For more information see `Object.on`
  */
-void jswrap_object_emit(JsVar *parent, JsVar *event, JsVar *argArray) {
 #ifndef ESPR_EMBED
+void jswrap_object_emit(JsVar *parent, JsVar *event, JsVar *argArray) {
   if (!jsvHasChildren(parent)) {
     jsExceptionHere(JSET_TYPEERROR, "Parent must be an object - not a String, Integer, etc.");
     return;
@@ -935,8 +939,8 @@ void jswrap_object_emit(JsVar *parent, JsVar *event, JsVar *argArray) {
 
   // unlock
   jsvUnLockMany(n, args);
-#endif
 }
+#endif
 
 /*JSON{
   "type" : "method",
@@ -1080,10 +1084,13 @@ void jswrap_function_replaceWith(JsVar *oldFunc, JsVar *newFunc) {
   }
   // If old was native or vice versa...
   if (jsvIsNativeFunction(oldFunc) != jsvIsNativeFunction(newFunc)) {
-    if (jsvIsNativeFunction(newFunc))
+    if (jsvIsNativeFunction(newFunc)) {
       oldFunc->flags = (oldFunc->flags&~JSV_VARTYPEMASK) | JSV_NATIVE_FUNCTION;
-    else
+      oldFunc->varData.native = newFunc->varData.native; // copy fn pointer
+    } else {
+      memset(&oldFunc->varData.native, 0, sizeof(oldFunc->varData.native)); // remove pointer info, zero it all out
       oldFunc->flags = (oldFunc->flags&~JSV_VARTYPEMASK) | JSV_FUNCTION;
+    }
   }
   // If old fn started with 'return' or vice versa...
   if (jsvIsFunctionReturn(oldFunc) != jsvIsFunctionReturn(newFunc)) {

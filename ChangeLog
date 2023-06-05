@@ -1,3 +1,5 @@
+     2v19 : 
+
      2v18 : Fix drawString with setClipRect with 90/270-degree rotation (fix #2343)
             Pico/Wifi: Enabled JIT compiler
             Ensure that if JIT fails, we correctly remove just the "jit" tag and treat the function as normal JS
@@ -11,6 +13,41 @@
             nRF52: Fix regression after whenConnected:true addition. NRF.wake() will now not start advertising when connected unless whenConnected:true is set.
             STM32: neopixel: Fix small glitches in the output pin just before writes that could throw off APA10x LEDs
             Bangle.js2: Ensure that changing a menu item when half-scrolled off screen doesn't overwrite widgets
+            Puck.js: Ensure acc/gyro doesn't cause watch events to be added to the input queue (more efficient)
+            Waveform: Fix waveform input/output when not done at system start - Since 2v13 start time was set in the past
+            Fix ordering of Pin check in wrapper (so autocomplete and Pin prototype works)
+            Bangle.js2: Switched to proprietary heart rate algorithm (from our Open Source version). It just works better. 
+            JIT: Implemented do { a } while (b)
+            Ensure that for(in), Object.keys and Object.getOwnPropertyNames return array indices as strings (not numbers)
+            Fix memory leak when an error happens while parsing function arguments - eg `print(1,2,3,JSON.parse("!%^$^"),123)`
+            Bangle.js2: Added Bangle.setOptions({hrmSportMode})
+            ESP32: Fix reset() causing meditation error (ref #1777)
+            ESP32: Ensure XON/XOFF flow control is enabled            
+            ESP32: Advertising name is now 'Espruino abcd'
+            ESP32: BLUETOOTH UART IS ENABLED BY DEFAULT - disable with `NRF.setServices({},{uart:false})`
+            Bangle.js: GPS event now works even if only GGA NMEA events are enabled (which you might do for speed)
+            Add Serial.flush() to allow us to wait for transmission on a device to finish
+            Fix for var link corruption when replacing a native function with a normal one (fix #2361)
+            Fix memory leak (and assert in debug mode) when iterating over an object with proto with for...of (fix #2360)
+            Fix debug assert when reversing an array with non-integer elements (fix #2362)
+            Fix debug assert when using instanceof if __proto__ was set to non-object (fix #2363)
+            Fix debug assert when creating a function with code that isn't a string (fix #2364)
+            Fix debug assert parsing {}=>{} when not executing (fix #2365)
+            Fix issue with Graphics.createImage if more than the first line was empty (fix #2296)
+            Bangle.js: Now auto-reset compass if it was on while the watch was charging (fix https://github.com/espruino/BangleApps/issues/2648)
+            Graphics: Added .floodFill method to allow flood fill
+            Added E.stopEventPropagation() to allow event propagation to be stopped with multiple X.on('...', ...)
+            Graphics: g.drawImage(gfx) now reads palette+transparent fields if they exist in a Graphics object
+            Graphics: g.asImage() now reads palette+transparent fields (if they exist) in a Graphics object
+            Ensure Graphics uses jswrap_math_sin/jswrap_math_cos (saves ~5k on SAVE_ON_FLASH_MATH builds)
+            Modified E.toString to always return a String (not necessarily flat) - fixes occasion errors in Bangle.js clocks that use it when setting up fonts
+            Added E.toFlatString (using old E.toString behaviour)
+            Ensure Promise.all completes even if empty or containing pre-resolved promises (fix #2371)
+            Allow Graphics.createImage to use '.' as a placeholder for an empty area
+            Bangle.js: If a Storage file called '.loading' exists, use that instead of the loading screen
+            Bangle.js: E.showPrompt now resets background color before clearing the screen
+            Bangle.js2: Ensure overlays are flipped when screen is flipped 180 degrees (eg. left-handed mode)
+            Bangle.js2: Automatically switch the heart rate algorithm into sport mode when a certain amount of movement is detected
 
      2v17 : Bangle.js: When reading file info from a filename table, do it in blocks of 8 (20% faster file search)
             Bangle.js2: Increase flash buffer size from 16->32 bytes (5% performance increase)

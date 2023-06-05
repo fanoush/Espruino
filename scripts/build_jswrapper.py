@@ -305,7 +305,7 @@ for className in classes:
     });
 
 # ------------------------------------------------------------------------------------------------------
-#print json.dumps(tree, sort_keys=True, indent=2)
+#print(json.dumps(tree, sort_keys=True, indent=2))
 # ------------------------------------------------------------------------------------------------------
 
 wrapperFile = open(wrapperFileName,'w')
@@ -398,6 +398,10 @@ codeOut('// --------------------------------------------------------------------
 codeOut('// -----------------------------------------------------------------------------------------');
 codeOut('');
 
+
+# In jswBinarySearch we used to use READ_FLASH_UINT16 for sym->strOffset and sym->functionSpec for ESP8266 
+# (where unaligned reads broke) but despite being packed, the structure JswSymPtr is still always an multiple
+# of 2 in length so they will always be halfword aligned.
 codeOut("""
 // Binary search coded to allow for JswSyms to be in flash on the esp8266 where they require
 // word accesses
@@ -405,13 +409,12 @@ JsVar *jswBinarySearch(const JswSymList *symbolsPtr, JsVar *parent, const char *
   uint8_t symbolCount = READ_FLASH_UINT8(&symbolsPtr->symbolCount);
   int searchMin = 0;
   int searchMax = symbolCount - 1;
-  while (searchMin <= searchMax) {
+  while (searchMin <= searchMax) {  
     int idx = (searchMin+searchMax) >> 1;
     const JswSymPtr *sym = &symbolsPtr->symbols[idx];
-    unsigned short strOffset = READ_FLASH_UINT16(&sym->strOffset);
-    int cmp = FLASH_STRCMP(name, &symbolsPtr->symbolChars[strOffset]);
+    int cmp = FLASH_STRCMP(name, &symbolsPtr->symbolChars[sym->strOffset]);
     if (cmp==0) {
-      unsigned short functionSpec = READ_FLASH_UINT16(&sym->functionSpec);
+      unsigned short functionSpec = sym->functionSpec;
       if ((functionSpec & JSWAT_EXECUTE_IMMEDIATELY_MASK) == JSWAT_EXECUTE_IMMEDIATELY)
         return jsnCallFunction(sym->functionPtr, functionSpec, parent, 0, 0);
       return jsvNewNativeFunction(sym->functionPtr, functionSpec);
@@ -447,6 +450,7 @@ print("Classifying Functions")
 builtins = OrderedDict()
 for jsondata in jsondatas:
   if "name" in jsondata:
+    #print(json.dumps(jsondata, sort_keys=True, indent=2))
     jsondata["static"] = not (jsondata["type"]=="property" or jsondata["type"]=="method")
 
     testCode = "!parent"
@@ -463,7 +467,7 @@ for jsondata in jsondatas:
           builtinName = builtinName+"_proto";
 
     if not testCode in builtins:
-      print("Adding "+testCode+" to builtins")
+      print("Adding "+testCode+" to builtins ("+className+")")
       builtins[testCode] = { "name" : builtinName, "className" : className, "isProto" : isProto, "functions" : [] }
     builtins[testCode]["functions"].append(jsondata);
 
@@ -613,17 +617,23 @@ codeOut('}')
 codeOut('')
 codeOut('')
 
-builtinChecks = []
+builtinObjectNames = []
 for jsondata in jsondatas:
   if "class" in jsondata:
-    check = 'strcmp(name, "'+jsondata["class"]+'")==0';
-    if not jsondata["class"] in libraries:
-      if not check in builtinChecks:
-        builtinChecks.append(check)
+    builtinObjectName = jsondata["class"];
+    if not builtinObjectName in libraries:
+      if not builtinObjectName in builtinObjectNames:
+        builtinObjectNames.append(builtinObjectName)
 
 
 codeOut('bool jswIsBuiltInObject(const char *name) {')
-codeOut('  return\n'+" ||\n    ".join(builtinChecks)+';')
+codeOut('  const char *objNames = "'+"\\0".join(builtinObjectNames)+'\\0";')
+codeOut('  const char *s = objNames;')
+codeOut('  while (*s) {')
+codeOut('    if (strcmp(s, name)==0) return true;') # OPT: I bet we could do this faster if not using strcmp, but it probably doesn't matter
+codeOut('    s+=strlen(s)+1;')
+codeOut('  }')
+codeOut('  return false;')
 codeOut('}')
 
 codeOut('')
@@ -718,6 +728,8 @@ codeOut('}')
 
 codeOut("/** Tasks to run when a character event is received */")
 codeOut('bool jswOnCharEvent(IOEventFlags channel, char charData) {')
+codeOut('  NOT_USED(channel);')
+codeOut('  NOT_USED(charData);')
 for jsondata in jsondatas:
   if "type" in jsondata and jsondata["type"].startswith("EV_"):
     codeOut("  if (channel=="+jsondata["type"]+") return "+jsondata["generate"]+"(charData);")
@@ -726,6 +738,7 @@ codeOut('}')
 
 codeOut("/** If we have a built-in module with the given name, return the module's contents - or 0 */")
 codeOut('const char *jswGetBuiltInJSLibrary(const char *name) {')
+codeOut('  NOT_USED(name);')
 for modulename in jsmodules:
   codeOut("  if (!strcmp(name,\""+modulename+"\")) return "+json.dumps(jsmodules[modulename])+";")
 codeOut('  return 0;')
@@ -743,59 +756,54 @@ for lib in jsmodules:
 codeOut('  return "'+','.join(librarynames)+'";')
 codeOut('}')
 
-codeOut('#ifdef USE_CALLFUNCTION_HACK')
-codeOut('// on Emscripten and i386 we cant easily hack around function calls with floats/etc, plus we have enough')
-codeOut('// resources, so just brute-force by handling every call pattern we use in a switch')
-codeOut('JsVar *jswCallFunctionHack(void *function, JsnArgumentType argumentSpecifier, JsVar *thisParam, JsVar **paramData, int paramCount) {')
-codeOut('  switch((int)argumentSpecifier) {')
-#for argSpec in argSpecs:
-#  codeOut('  case '+argSpec+":")
-argSpecs = []
-for jsondata in jsondatas:
-  if "generate" in jsondata:
-    argSpec = getArgumentSpecifier(jsondata)
-    if not argSpec in argSpecs:
-      argSpecs.append(argSpec)
-      params = getParams(jsondata)
-      result = getResult(jsondata);
-      pTypes = []
-      pValues = []
-      if hasThis(jsondata): 
-        pTypes.append("JsVar*")
-        pValues.append("thisParam")
-      cmd = "";
-      cmdstart = "";
-      cmdend = "";
-      n = 0
-      for param in params:
-        pTypes.append(toCType(param[1]));
-        if param[1]=="JsVarArray": 
-          cmdstart =  "      JsVar *argArray = (paramCount>"+str(n)+")?jsvNewArray(&paramData["+str(n)+"],paramCount-"+str(n)+"):jsvNewEmptyArray();\n";
-          pValues.append("argArray");
-          cmdend = "      jsvUnLock(argArray);\n\n";
-        else:
-          pValues.append(toCUnbox(param[1])+"((paramCount>"+str(n)+")?paramData["+str(n)+"]:0)");
-        n = n+1
+if "USE_CALLFUNCTION_HACK" in board.defines:
+  codeOut('// on Emscripten and i386 we cant easily hack around function calls with floats/etc, plus we have enough')
+  codeOut('// resources, so just brute-force by handling every call pattern we use in a switch')
+  codeOut('JsVar *jswCallFunctionHack(void *function, JsnArgumentType argumentSpecifier, JsVar *thisParam, JsVar **paramData, int paramCount) {')
+  codeOut('  switch((int)argumentSpecifier) {')
+  #for argSpec in argSpecs:
+  #  codeOut('  case '+argSpec+":")
+  argSpecs = []
+  for jsondata in jsondatas:
+    if "generate" in jsondata:
+      argSpec = getArgumentSpecifier(jsondata)
+      if not argSpec in argSpecs:
+        argSpecs.append(argSpec)
+        params = getParams(jsondata)
+        result = getResult(jsondata);
+        pTypes = []
+        pValues = []
+        if hasThis(jsondata):
+          pTypes.append("JsVar*")
+          pValues.append("thisParam")
+        cmd = "";
+        cmdstart = "";
+        cmdend = "";
+        n = 0
+        for param in params:
+          pTypes.append(toCType(param[1]));
+          if param[1]=="JsVarArray":
+            cmdstart =  "      JsVar *argArray = (paramCount>"+str(n)+")?jsvNewArray(&paramData["+str(n)+"],paramCount-"+str(n)+"):jsvNewEmptyArray();\n";
+            pValues.append("argArray");
+            cmdend = "      jsvUnLock(argArray);\n\n";
+          else:
+            pValues.append(toCUnbox(param[1])+"((paramCount>"+str(n)+")?paramData["+str(n)+"]:0)");
+          n = n+1
 
-      codeOut("    case "+argSpec+": {");
-      codeOut("      JsVar *result = 0;");
-      if cmdstart:  codeOut(cmdstart); 
-      cmd = "(("+toCType(result[0])+"(*)("+",".join(pTypes)+"))function)("+",".join(pValues)+")";
-      if result[0]: codeOut("      result = "+toCBox(result[0])+"("+cmd+");");
-      else: codeOut("      "+cmd+";");
-      if cmdend:  codeOut(cmdend); 
-      codeOut("      return result;");
-      codeOut("    }");
-
-
-      
-
-#((uint32_t (*)(size_t,size_t,size_t,size_t))function)(argData[0],argData[1],argData[2],argData[3]);
-codeOut('  default: jsExceptionHere(JSET_ERROR,"Unknown argspec %d",argumentSpecifier);')
-codeOut('  }')
-codeOut('  return 0;')
-codeOut('}')
-codeOut('#endif')
+        codeOut("    case "+argSpec+": {");
+        codeOut("      JsVar *result = 0;");
+        if cmdstart:  codeOut(cmdstart);
+        cmd = "(("+toCType(result[0])+"(*)("+",".join(pTypes)+"))function)("+",".join(pValues)+")";
+        if result[0]: codeOut("      result = "+toCBox(result[0])+"("+cmd+");");
+        else: codeOut("      "+cmd+";");
+        if cmdend:  codeOut(cmdend);
+        codeOut("      return result;");
+        codeOut("    }");
+  #((uint32_t (*)(size_t,size_t,size_t,size_t))function)(argData[0],argData[1],argData[2],argData[3]);
+  codeOut('  default: jsExceptionHere(JSET_ERROR,"Unknown argspec %d",argumentSpecifier);')
+  codeOut('  }')
+  codeOut('  return 0;')
+  codeOut('}')
 
 codeOut('')
 codeOut('')
