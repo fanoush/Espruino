@@ -16,7 +16,9 @@
 import pinutils;
 
 info = {
- 'name' : "Bangle.js 2", # Using SMA Q3
+ 'name' : "Bangle.js 2 (No external flash)", # Using SMA Q3
+ # A build for Bangle.js 2 that uses only internal flash
+ 'boardname' : "BANGLEJS", 
  'link' :  [ "https://espruino.com/Bangle.js2" ],
  'espruino_page_link' : 'Bangle.js2',
  'default_console' : "EV_TERMINAL",
@@ -25,10 +27,9 @@ info = {
 # 'default_console_rx' : "D8",
 # 'default_console_baudrate' : "9600",
  'variables' : 12000, # How many variables are allocated for Espruino to use. RAM will be overflowed if this number is too high and code won't compile.
-                      # Currently leaves around 38k of free stack - *loads* more than we need
  'io_buffer_size' : 512, # How big is the input buffer (in 4 byte words). Default on nRF52 is 256
  'bootloader' : 1,
- 'binary_name' : 'espruino_%v_banglejs2.hex',
+ 'binary_name' : 'espruino_%v_banglejs2_noflash.hex',
  'build' : {
    'optimizeflags' : '-Os',
    'libraries' : [
@@ -37,7 +38,7 @@ info = {
      'GRAPHICS',
      'CRYPTO','SHA256','SHA512',
      'LCD_MEMLCD',
-     'TENSORFLOW',
+#     'TENSORFLOW',
      'JIT' # JIT compiler enabled
    ],
    'makefile' : [
@@ -52,8 +53,8 @@ info = {
      'DEFINES += -DESPR_DCDC_ENABLE=1', # Use DC/DC converter
      'ESPR_BLUETOOTH_ANCS=1', # Enable ANCS (Apple notifications) support
      'DEFINES += -DSPIFLASH_SLEEP_CMD', # SPI flash needs to be explicitly slept and woken up
-     'DEFINES += -DSPIFLASH_READ2X', # Read SPI flash at 2x speed using MISO and MOSI for IO
-     'DEFINES += -DESPR_JSVAR_FLASH_BUFFER_SIZE=32', # The buffer size we use when executing/iterating over data in flash memory (default 16). Should be set based on benchmarks.
+#     'DEFINES += -DSPIFLASH_READ2X', # Read SPI flash at 2x speed using MISO and MOSI for IO     
+     'DEFINES += -DESPR_JSVAR_FLASH_BUFFER_SIZE=32', # The buffer size we use when executing/iterating over data in flash memory (default 16). Should be set based on benchmarks.     
      'DEFINES += -DAPP_TIMER_OP_QUEUE_SIZE=6', # Bangle.js accelerometer poll handler needs something else in queue size
      'DEFINES+=-DBLUETOOTH_NAME_PREFIX=\'"Bangle.js"\'',
      'DEFINES+=-DCUSTOM_GETBATTERY=jswrap_banglejs_getBattery',
@@ -79,9 +80,9 @@ info = {
      'SOURCES += libs/misc/unistroke.c',
      'WRAPPERSOURCES += libs/misc/jswrap_unistroke.c',
      'DEFINES += -DESPR_BANGLE_UNISTROKE=1',
-     'SOURCES += libs/banglejs/banglejs2_storage_default.c',
-     'DEFINES += -DESPR_STORAGE_INITIAL_CONTENTS=1', # use banglejs2_storage_default
-     'DEFINES += -DESPR_USE_STORAGE_CACHE=32', # Add a 32 entry cache to speed up finding files
+#     'SOURCES += libs/banglejs/banglejs2_storage_default.c',
+#     'DEFINES += -DESPR_STORAGE_INITIAL_CONTENTS=1', # use banglejs2_storage_default
+#     'DEFINES += -DESPR_USE_STORAGE_CACHE=32', # Add a 32 entry cache to speed up finding files
      'JSMODULESOURCES += libs/js/banglejs/locale.min.js',
 
      'DFU_SETTINGS=--application-version 0xff --hw-version 52 --sd-req 0xa9,0xae,0xb6',
@@ -89,7 +90,6 @@ info = {
      'DEFINES += -DNRF_BOOTLOADER_NO_WRITE_PROTECT=1', # By default the bootloader protects flash. Avoid this (a patch for NRF_BOOTLOADER_NO_WRITE_PROTECT must be applied first)
      'DEFINES += -DBUTTONPRESS_TO_REBOOT_BOOTLOADER',
      'BOOTLOADER_SETTINGS_FAMILY=NRF52840',
-     'DEFINES += -DESPR_BOOTLOADER_SPIFLASH', # Allow bootloader to flash direct from SPI flash
      'NRF_SDK15=1'
    ]
  }
@@ -109,15 +109,10 @@ chip = {
   'adc' : 1,
   'dac' : 0,
   'saved_code' : {
-#    'address' : ((246 - 20) * 4096), # Bootloader takes pages 248-255, FS takes 246-247
+    'address' : ((246 - 120) * 4096), # Bootloader takes pages 248-255, FS takes 246-247
     'page_size' : 4096,
-#    'pages' : 20,
-    'flash_available' : 1024 - ((38 + 8 + 2 + 20)*4), # Softdevice uses 0x26=38 pages of flash, bootloader 8, FS 2, code 20. Each page is 4 kb.
-#    'address2' : 0x60000000, # put this in external spiflash (see below)
-#    'pages2' : 2048, # Entire 8MB of external flash
-
-    'address' : 0x60000000, # put this in external spiflash (see below)
-    'pages' : 2048, # Entire 8MB of external flash
+    'pages' : 120,
+    'flash_available' : 1024 - ((38 + 8 + 2 + 120)*4), # Softdevice uses 0x26=38 pages of flash, bootloader 8, FS 2, code 100. Each page is 4 kb.
   },
 };
 
@@ -126,7 +121,7 @@ devices = {
   'LED1' : { 'pin' : 'D8', 'novariable':True }, # Backlight flash for low level debug - but in code we just use 'fake' LEDs
   'LCD' : {
             'width' : 176, 'height' : 176, 
-            'bpp' : 3, # LCD is native 3 bit (fastest transfers), but 4 is faster for drawing and slow to transfer
+            'bpp' : 3,
             'controller' : 'LPM013M126', # LPM013M126C
             'pin_cs' : 'D5',
             'pin_extcomin' : 'D6',
