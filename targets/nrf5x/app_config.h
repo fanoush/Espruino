@@ -54,12 +54,47 @@
 #ifdef ESPR_BLUETOOTH_ANCS
 #define BLE_ANCS_C_ENABLED 1
 #define BLE_AMS_C_ENABLED 1
+#define BLE_CTS_C_ENABLED 1
 #define BLE_DB_DISCOVERY_ENABLED 1
 
 #ifndef BLE_AMS_C_BLE_OBSERVER_PRIO // not part of normal SDK so not in sdk_config.h
 #define BLE_AMS_C_BLE_OBSERVER_PRIO BLE_ANCS_C_BLE_OBSERVER_PRIO
 #endif // BLE_AMS_C_BLE_OBSERVER_PRIO
 #endif // ESPR_BLUETOOTH_ANCS
+
+#if SPI_COUNT>0
+#define SPI_ENABLED 1
+#define SPI0_ENABLED 1
+#define SPI0_USE_EASY_DMA 1
+#else
+#define SPI_ENABLED 0
+#endif // SPI_COUNT
+
+#if I2C_COUNT>0
+#define TWI_ENABLED 1
+#define TWI1_ENABLED 1
+#define TWI1_USE_EASY_DMA 0
+#else
+#define TWI_ENABLED 0
+#endif // I2C_COUNT
+
+#if USART_COUNT>0
+#define UART_ENABLED 1
+#define UART0_ENABLED 1
+#ifdef NRF52840 // SDK15/NRF52840
+#define UART_EASY_DMA_SUPPORT 1
+#define UART0_CONFIG_USE_EASY_DMA 1
+#define UART1_ENABLED 1 // enable UART1 as well on nRF52840
+#define UART1_CONFIG_USE_EASY_DMA 1
+#else // SDKs before 15
+#define UART_EASY_DMA_SUPPORT 0
+#define UART0_CONFIG_USE_EASY_DMA 0
+#endif
+#else // USART_COUNT=0
+#define UART_ENABLED 0
+#endif // USART_COUNT
+
+#define I2S_ENABLED 1 // For neopixels
 
 // Based on SDK12
 #ifdef NRF5X_SDK_12
@@ -98,7 +133,7 @@
 #else
 #define FDS_ENABLED 0
 #define FSTORAGE_ENABLED 0
-#endif
+#endif // PEER_MANAGER_ENABLED
 
 #define HARDFAULT_HANDLER_ENABLED 0
 
@@ -114,43 +149,10 @@
 #define PPI_ENABLED 1
 #define RNG_ENABLED 1
 #define SAADC_ENABLED 1
-
-#if SPI_COUNT>0
-#define SPI_ENABLED 1
-#define SPI0_ENABLED 1
-#define SPI0_USE_EASY_DMA 1
-#else
-#define SPI_ENABLED 0
-#endif // SPI_COUNT
-
-#if I2C_COUNT>0
-#define TWI_ENABLED 1
-#define TWI1_ENABLED 1
-#define TWI1_USE_EASY_DMA 0
-#else
-#define TWI_ENABLED 0
-#endif // I2C_COUNT
-
-#if USART_COUNT>0
-#define UART_ENABLED 1
-#define UART_EASY_DMA_SUPPORT 0 // 1 in SDK15+
-#define UART0_ENABLED 1
-#define UART0_CONFIG_USE_EASY_DMA 0
-#else
-#define UART_ENABLED 0
-#endif
-
-#define I2S_ENABLED 1
 #endif // NRF5X_SDK_12
 
-// SDK15
-#ifdef NRF52840
-#define UART_ENABLED 1
-#define UART_EASY_DMA_SUPPORT 1
-#define UART0_ENABLED 1
-#define UART0_CONFIG_USE_EASY_DMA 1
-#define UART1_ENABLED 1
-#define UART1_CONFIG_USE_EASY_DMA 1
+#ifdef NRF5X_SDK_15 // SDK15/NRF52840
+
 // To allow advertising transmit via coded phy (connectable:true,scannable:false)
 // #define NRF_SDH_BLE_GAP_EVENT_LENGTH 10
 #endif // NRF52840
@@ -165,5 +167,24 @@
 #else // On internal oscillator
 #define NRF_SDH_CLOCK_LF_ACCURACY NRF_CLOCK_LF_ACCURACY_500_PPM
 #endif // ESPR_LSE_ENABLE
+
+// APP_TIMER_SAFE_WINDOW_MS - Maximum possible latency (in milliseconds) of handling app_timer event, For SDK 15.3.0
+#define APP_TIMER_SAFE_WINDOW_MS 300000
+// For SDK 15.3.0
+#define FDS_VIRTUAL_PAGES_RESERVED 0
+
+
+#ifndef PERIPHERAL_LINK_COUNT
+#define PERIPHERAL_LINK_COUNT 1
+#endif
+#ifndef CENTRAL_LINK_COUNT
+#if PEER_MANAGER_ENABLED // if no peer manager, no central
+#define CENTRAL_LINK_COUNT 1
+#else
+#define CENTRAL_LINK_COUNT 0
+#endif
+#endif
+// SDK15+ (fixes BLE UART send when CENTRAL_LINK_COUNT>1)
+#define NRF_SDH_BLE_TOTAL_LINK_COUNT (CENTRAL_LINK_COUNT + PERIPHERAL_LINK_COUNT)
 
 // Other SDK configs are still in sdk_config.h

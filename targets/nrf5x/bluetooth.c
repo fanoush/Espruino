@@ -65,6 +65,7 @@
 #if PEER_MANAGER_ENABLED
 #include "peer_manager.h"
 #include "fds.h"
+#include "id_manager.h"
 #if NRF_SD_BLE_API_VERSION<5
 #include "fstorage.h"
 #include "fstorage_internal_defs.h"
@@ -74,6 +75,7 @@ static pm_peer_id_t   m_peer_id;                              /**< Device refere
 static pm_peer_id_t   m_whitelist_peers[BLE_GAP_WHITELIST_ADDR_MAX_COUNT];  /**< List of peers currently in the whitelist. */
 static uint32_t       m_whitelist_peer_cnt;                                 /**< Number of peers currently in the whitelist. */
 static bool           m_is_wl_changed;                                      /**< Indicates if the whitelist has been changed since last time it has been updated in the Peer Manager. */
+static volatile ble_gap_sec_params_t  m_sec_params;                         /**< Current security parameters. */
 // needed for peer_manager_init so we can smoothly upgrade from pre 1v92 firmwares
 #include "fds_internal_defs.h"
 // If we have peer manager we have central mode and NRF52
@@ -171,6 +173,7 @@ BLE_HIDS_DEF(m_hids,
 static bool                             m_in_boot_mode = false;
 #endif
 
+
 #if NRF_SD_BLE_API_VERSION > 5
 uint8_t m_adv_handle = BLE_GAP_ADV_SET_HANDLE_NOT_SET;                   /**< Advertising handle used to identify an advertising set. */
 int8_t m_tx_power = 0;
@@ -234,6 +237,9 @@ bool bleHighInterval;
 #endif
 
 static ble_gap_sec_params_t get_gap_sec_params();
+#if PEER_MANAGER_ENABLED
+static bool jsble_can_pair_with_peer(const ble_gap_sec_params_t *own_params, const ble_gap_sec_params_t *peer_params);
+#endif
 
 #if NRF_SD_BLE_API_VERSION>5
 // if m_scan_param.extended=0, use BLE_GAP_SCAN_BUFFER_MIN
@@ -252,6 +258,7 @@ ble_data_t m_scan_buffer = {
 /// Checks for error and reports an exception string if there was one, else 0 if no error
 JsVar *jsble_get_error_string(uint32_t err_code) {
   if (!err_code) return 0;
+#ifndef ESPR_NO_BLUETOOTH_MESSAGES
   const char *name = 0;
   switch (err_code) {
    case NRF_ERROR_NO_MEM        : name="NO_MEM"; break;
@@ -268,13 +275,17 @@ JsVar *jsble_get_error_string(uint32_t err_code) {
    case BLE_ERROR_GAP_INVALID_BLE_ADDR
                                 : name="INVALID_BLE_ADDR"; break;
    case NRF_ERROR_CONN_COUNT    : name="CONN_COUNT"; break;
+   case BLE_ERROR_NOT_ENABLED   : name="NOT_ENABLED"; break;
 
 #if NRF_SD_BLE_API_VERSION<5
    case BLE_ERROR_NO_TX_PACKETS : name="NO_TX_PACKETS"; break;
 #endif
   }
-  if (name) return jsvVarPrintf("ERR 0x%x (%s)", err_code, name);
-  else return jsvVarPrintf("ERR 0x%x", err_code);
+  if (name)
+    return jsvVarPrintf("ERR 0x%x (%s)", err_code, name);
+  else
+#endif // ESPR_NO_BLUETOOTH_MESSAGES
+    return jsvVarPrintf("ERR 0x%x", err_code);
 }
 
 // -----------------------------------------------------------------------------------
@@ -518,23 +529,34 @@ int jsble_exec_pending(IOEvent *event) {
 #ifdef LINK_SECURITY
       case BLEP_TASK_PASSKEY_DISPLAY: { // data = connection handle
         uint16_t conn_handle = data;
+#if CENTRAL_LINK_COUNT>0
         /* TODO: yes/no passkey
 uint8_t match_request : 1;               If 1 requires the application to report the match using @ref sd_ble_gap_auth_key_reply
                                          with either @ref BLE_GAP_AUTH_KEY_TYPE_NONE if there is no match or
                                          @ref BLE_GAP_AUTH_KEY_TYPE_PASSKEY if there is a match. */
         int centralIdx = jsble_get_central_connection_idx(conn_handle);
+#endif
         if (bufferLen==BLE_GAP_PASSKEY_LEN) {
           buffer[BLE_GAP_PASSKEY_LEN] = 0;
-          JsVar *gattServer = bleGetActiveBluetoothGattServer(centralIdx);
-          if (gattServer) {
-            JsVar *passkey = jsvNewFromString((char*)buffer);
-            JsVar *bluetoothDevice = jsvObjectGetChildIfExists(gattServer, "device");
-            if (bluetoothDevice) {
-              jsiQueueObjectCallbacks(bluetoothDevice, JS_EVENT_PREFIX"passkey", &passkey, 1);
-              jshHadEvent();
+          JsVar *passkey = jsvNewFromString((char*)buffer);
+#if CENTRAL_LINK_COUNT>0
+          if (centralIdx<0) { // it's on the peripheral connection
+#endif
+            bleQueueEventAndUnLock(JS_EVENT_PREFIX"passkey", passkey);
+#if CENTRAL_LINK_COUNT>0
+          } else { // it's on a central connection
+            JsVar *gattServer = bleGetActiveBluetoothGattServer(centralIdx);
+            if (gattServer) {
+              JsVar *bluetoothDevice = jsvObjectGetChildIfExists(gattServer, "device");
+              if (bluetoothDevice) {
+                jsiQueueObjectCallbacks(bluetoothDevice, JS_EVENT_PREFIX"passkey", &passkey, 1);
+                jshHadEvent();
+              }
+              jsvUnLock2(bluetoothDevice, gattServer);
             }
-            jsvUnLock3(passkey, bluetoothDevice, gattServer);
           }
+#endif
+          jsvUnLock(passkey);
         }
         break;
       }
@@ -572,6 +594,7 @@ uint8_t match_request : 1;               If 1 requires the application to report
           }
           jsvUnLock(options);
           if (!ok) jsExceptionHere(JSET_INTERNALERROR, "Auth key requested, but NRF.setSecurity({oob}) not valid");
+          // TODO: this could be because we have keyboard:1 and the connecting device is displaying a passkey and wants US to send it back (we only implement that for central at the moment)
         }
         break;
        }
@@ -581,6 +604,7 @@ uint8_t match_request : 1;               If 1 requires the application to report
         JsVar *o = jsvNewObject();
         if (o) {
           const char *str=NULL;
+#ifndef ESPR_NO_BLUETOOTH_MESSAGES
           switch(auth_status->auth_status) {
             case BLE_GAP_SEC_STATUS_SUCCESS                : str="SUCCESS";break;
             case BLE_GAP_SEC_STATUS_TIMEOUT                : str="TIMEOUT";break;
@@ -602,6 +626,7 @@ uint8_t match_request : 1;               If 1 requires the application to report
             case BLE_GAP_SEC_STATUS_BR_EDR_IN_PROG         : str="BR_EDR_IN_PROG";break;
             case BLE_GAP_SEC_STATUS_X_TRANS_KEY_DISALLOWED : str="X_TRANS_KEY_DISALLOWED";break;
           }
+#endif // ESPR_NO_BLUETOOTH_MESSAGES
           jsvObjectSetChildAndUnLock(o,"auth_status",str?jsvNewFromString(str):jsvNewFromInteger(auth_status->auth_status));
           jsvObjectSetChildAndUnLock(o, "bonded", jsvNewFromBool(auth_status->bonded));
           jsvObjectSetChildAndUnLock(o, "lv4", jsvNewFromInteger(auth_status->sm1_levels.lv4));
@@ -613,6 +638,9 @@ uint8_t match_request : 1;               If 1 requires the application to report
       }
 #endif
 #ifdef ESPR_BLUETOOTH_ANCS
+      case BLEP_ANCS_DISCOVERED:
+        ble_ancs_handle_discovered();
+        break;
       case BLEP_ANCS_NOTIF:
         ble_ancs_handle_notif(blep, (ble_ancs_c_evt_notif_t*)buffer);
         break;
@@ -621,6 +649,13 @@ uint8_t match_request : 1;               If 1 requires the application to report
         break;
       case BLEP_ANCS_APP_ATTR:
         ble_ancs_handle_app_attr(blep, (char *)buffer, bufferLen);
+        break;
+      case BLEP_ANCS_ERROR:
+        if (BLETASK_IS_ANCS(bleGetCurrentTask()))
+          bleCompleteTaskFailAndUnLock(bleGetCurrentTask(), jsvNewFromString("ANCS Error"));
+        break;
+      case BLEP_AMS_DISCOVERED:
+        ble_ams_handle_discovered();
         break;
       case BLEP_AMS_TRACK_UPDATE:
         ble_ams_handle_track_update(blep, data, (char *)buffer, bufferLen);
@@ -631,14 +666,20 @@ uint8_t match_request : 1;               If 1 requires the application to report
       case BLEP_AMS_ATTRIBUTE:
         ble_ams_handle_attribute(blep, (char *)buffer, bufferLen);
         break;
-      case BLEP_ANCS_ERROR:
-        if (BLETASK_IS_ANCS(bleGetCurrentTask()))
-          bleCompleteTaskFailAndUnLock(bleGetCurrentTask(), jsvNewFromString("ANCS Error"));
+      case BLEP_CTS_DISCOVERED:
+        ble_cts_handle_discovered();
+        break;
+      case BLEP_CTS_TIME:
+        ble_cts_handle_time(blep, (char *)buffer, bufferLen);
         break;
 #endif
+#ifndef SAVE_ON_FLASH
    default:
      jsWarn("jsble_exec_pending: Unknown enum type %d",(int)blep);
+#endif
  }
+ if (jspIsInterrupted())
+   jsWarn("Interrupted processing event %d",(int)blep);
  return eventsHandled;
 }
 
@@ -722,7 +763,7 @@ bool jsble_check_error_line(uint32_t err_code, int lineNumber) {
   JsVar *v = jsble_get_error_string(err_code);
   if (!v) return 0;
   jsExceptionHere(JSET_ERROR, "%v (:%d)", v, lineNumber);
-  jsvUnLock(v);
+  bleQueueEventAndUnLock(JS_EVENT_PREFIX"error", v);
   return true;
 }
 #else
@@ -864,13 +905,36 @@ void nrf_log_frontend_std_6(uint32_t           severity_mid,
 #endif
 }
 
+void nrf_log_frontend_hexdump(uint32_t           severity_mid,
+                              const void * const p_data,
+                              uint16_t           length) {
+  uint8_t *u8_data = (uint8_t *)p_data;
+  unsigned int i;
+  for (i=0;i<length;i++) {
+    jshTransmitPrintf(DEFAULT_CONSOLE_DEVICE, "%02x ", u8_data[i]);
+    if ((i&7) == 7) {
+      jshTransmit(DEFAULT_CONSOLE_DEVICE, '\r');
+      jshTransmit(DEFAULT_CONSOLE_DEVICE, '\n');
+    }
+  }
+  jshTransmit(DEFAULT_CONSOLE_DEVICE, '\r');
+  jshTransmit(DEFAULT_CONSOLE_DEVICE, '\n');
+}
+
+#ifdef NRF5X_SDK_15_3
+const nrf_log_module_const_data_t m_nrf_log_app_logs_data_const = {
+    .p_module_name = ""
+};
+#else
 nrf_log_module_dynamic_data_t NRF_LOG_MODULE_DATA_DYNAMIC = {
     .module_id = 0
 };
 #endif
+#endif
 
 /// Function for handling an event from the Connection Parameters Module.
 static void on_conn_params_evt(ble_conn_params_evt_t * p_evt) {
+  // Either BLE_CONN_PARAMS_EVT_FAILED or BLE_CONN_PARAMS_EVT_SUCCEEDED - that's it
 }
 
 /// Sigh - NFC has lots of these, so we need to define it to build
@@ -1034,7 +1098,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
       p_ble_evt->header.evt_id != BLE_EVT_TX_COMPLETE)
     jsiConsolePrintf("[%d %d]\n", p_ble_evt->header.evt_id, p_ble_evt->evt.gattc_evt.params.hvx.handle );*/
 #if ESPR_BLUETOOTH_ANCS
-  if (bleStatus & BLE_ANCS_OR_AMS_INITED)
+  if (bleStatus & BLE_ANCS_AMS_OR_CTS_INITED)
     ble_ancs_on_ble_evt(p_ble_evt);
 #endif
     uint32_t err_code;
@@ -1171,7 +1235,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
           // if we were on bluetooth and we disconnected, clear the input line so we're fresh next time (#2219)
           if (jsiGetConsoleDevice()==EV_BLUETOOTH) {
             jsiClearInputLine(false);
-            if (!jsiIsConsoleDeviceForced()) 
+            if (!jsiIsConsoleDeviceForced())
               jsiSetConsoleDevice(jsiGetPreferredConsoleDevice(), 0);
           }
           // by calling nus_transmit_string here without a connection, we clear the Bluetooth output buffer
@@ -1192,11 +1256,27 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
         if (centralIdx) {
           jsble_queue_pending(BLEP_RSSI_CENTRAL, (p_ble_evt->evt.gap_evt.params.rssi_changed.rssi&255) | (centralIdx<<8));
         }
-#endif    
+#endif
         if (centralIdx < 0) {
           jsble_queue_pending(BLEP_RSSI_PERIPH, p_ble_evt->evt.gap_evt.params.rssi_changed.rssi);
         }
       } break;
+
+#if PEER_MANAGER_ENABLED && (NRF_SD_BLE_API_VERSION < 5)
+      case BLE_GAP_EVT_SEC_PARAMS_REQUEST: {
+        ble_gap_sec_params_t own_params = m_sec_params;
+        ble_gap_sec_params_t peer_params = p_ble_evt->evt.gap_evt.params.sec_params_request.peer_params;
+        if (!jsble_can_pair_with_peer(&own_params, &peer_params)) {
+          // reject security procedure
+          ble_gap_sec_params_t sec_params = m_sec_params;
+          err_code = sd_ble_gap_sec_params_reply(m_peripheral_conn_handle,
+                                                 BLE_GAP_SEC_STATUS_PAIRING_NOT_SUPP,
+                                                 &sec_params,
+                                                 NULL);
+          APP_ERROR_CHECK_NOT_URGENT(err_code);
+        }
+      } break;
+#endif
 
 #if PEER_MANAGER_ENABLED==0
       case BLE_GAP_EVT_SEC_PARAMS_REQUEST:{
@@ -1535,7 +1615,7 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
         jsble_queue_pending(BLEP_TASK_DISCOVER_CCCD, cccd_handle);
       } break;
 
-      case BLE_GATTC_EVT_READ_RSP: if (bleInTask(BLETASK_CHARACTERISTIC_READ)) {
+      case BLE_GATTC_EVT_READ_RSP: if (bleInTask(BLETASK_CHARACTERISTIC_READ)) { // ignore read responses if not in a READ task (ANCS/AMS/CTS/etc can create READ_RSP events)
         const ble_gattc_evt_read_rsp_t *p_read = &p_ble_evt->evt.gattc_evt.params.read_rsp;
         jsble_queue_pending_buf(BLEP_TASK_CHARACTERISTIC_READ, 0, (char*)&p_read->data[0], p_read->len);
       } break;
@@ -1710,7 +1790,7 @@ static void pm_evt_handler(pm_evt_t const * p_evt) {
                 //      You should check on what kind of white list policy your application should use.
             }
 #if ESPR_BLUETOOTH_ANCS
-            if (bleStatus & BLE_ANCS_OR_AMS_INITED)
+            if (bleStatus & BLE_ANCS_AMS_OR_CTS_INITED)
               ble_ancs_bonding_succeeded(p_evt->conn_handle);
 #endif
 
@@ -1750,10 +1830,25 @@ static void pm_evt_handler(pm_evt_t const * p_evt) {
             pm_conn_sec_config_reply(p_evt->conn_handle, &conn_sec_config);
         } break;
 
+#if (NRF_SD_BLE_API_VERSION >= 5)
+        case PM_EVT_CONN_SEC_PARAMS_REQ: {
+            ble_gap_sec_params_t own_params = m_sec_params;
+            const ble_gap_sec_params_t *peer_params = p_evt->params.conn_sec_params_req.p_peer_params;
+            if (!jsble_can_pair_with_peer(&own_params, peer_params)) {
+                // reject security procedure
+                err_code = pm_conn_sec_params_reply(p_evt->conn_handle, NULL,
+                                                    p_evt->params.conn_sec_params_req.p_context);
+                APP_ERROR_CHECK_NOT_URGENT(err_code);
+            }
+        } break;
+#endif
+
         case PM_EVT_STORAGE_FULL:
         {
+            jsWarn("PM: PM_EVT_STORAGE_FULL - running garbage collection");
             // Run garbage collection on the flash.
             err_code = fds_gc();
+            jsWarn("Garbage collection result: %d", err_code);
             if (err_code == FDS_ERR_BUSY || err_code == FDS_ERR_NO_SPACE_IN_QUEUES)
             {
                 // Retry.
@@ -1787,7 +1882,8 @@ static void pm_evt_handler(pm_evt_t const * p_evt) {
             break;
 
         case PM_EVT_PEERS_DELETE_SUCCEEDED:
-            jsble_queue_pending(BLEP_ADVERTISING_START, 0); // start advertising again
+            if (!(bleStatus & BLE_IS_SLEEPING))
+              jsble_queue_pending(BLEP_ADVERTISING_START, 0); // start advertising again if not asleep
             break;
 
         case PM_EVT_PEERS_DELETE_FAILED:
@@ -1991,12 +2087,70 @@ static ble_gap_sec_params_t get_gap_sec_params() {
   return sec_param;
 }
 
+#if PEER_MANAGER_ENABLED
+static bool jsble_can_pair_with_peer(const ble_gap_sec_params_t *own_params, const ble_gap_sec_params_t *peer_params) {
+  if (bleStatus & BLE_IS_NOT_PAIRABLE) {
+    // reject all security procedures to prevent any peer from pairing with us
+    return false;
+  } else {
+    if (own_params && peer_params) {
+      // reject security procedure if we want mitm protection, but this is impossible with the current peer
+      bool lesc = own_params->lesc == 1 && peer_params->lesc == 1;
+      bool useOob = lesc ?
+                    (own_params->oob == 1 || peer_params->oob == 1) :
+                    (own_params->oob == 1 && peer_params->oob == 1);
+      bool hasKeyboard = own_params->io_caps == BLE_GAP_IO_CAPS_KEYBOARD_ONLY ||
+                         own_params->io_caps == BLE_GAP_IO_CAPS_KEYBOARD_DISPLAY;
+      bool authenticated = false;
+      switch (peer_params->io_caps) {
+        case BLE_GAP_IO_CAPS_DISPLAY_ONLY:
+          authenticated = hasKeyboard;
+          break;
+        case BLE_GAP_IO_CAPS_DISPLAY_YESNO:
+          authenticated = lesc ?
+                          (hasKeyboard || own_params->io_caps == BLE_GAP_IO_CAPS_DISPLAY_YESNO) :
+                          hasKeyboard;
+          break;
+        case BLE_GAP_IO_CAPS_KEYBOARD_ONLY:
+          authenticated = own_params->io_caps != BLE_GAP_IO_CAPS_NONE;
+          break;
+        case BLE_GAP_IO_CAPS_NONE:
+          authenticated = false;
+          break;
+        case BLE_GAP_IO_CAPS_KEYBOARD_DISPLAY:
+          authenticated = own_params->io_caps != BLE_GAP_IO_CAPS_NONE;
+          break;
+        default:
+          authenticated = false;
+          break;
+      }
+      if (!useOob && own_params->mitm == 1 && !authenticated) {
+        // reject security procedure
+        return false;
+      }
+    }
+  }
+  return true;
+}
+#endif
+
 void jsble_update_security() {
 #if PEER_MANAGER_ENABLED
   bool encryptUart = false;
+  bool mitmProtect = false;
   ble_gap_sec_params_t sec_param = get_gap_sec_params();
-  // encrypt UART for out of band pairing
-  if (sec_param.oob) encryptUart = true;
+  m_sec_params = sec_param;
+  // encrypt UART and require mitm protection for out of band pairing
+  if (sec_param.oob) {
+    encryptUart = true;
+    mitmProtect = true;
+  }
+  // if mitm protection is requested, we also need to encrypt the UART
+  if (sec_param.mitm) {
+    encryptUart = true;
+    mitmProtect = true;
+  }
+
 
   uint32_t err_code = pm_sec_params_set(&sec_param);
   jsble_check_error(err_code);
@@ -2006,6 +2160,16 @@ void jsble_update_security() {
     JsVar *v;
     if (jsvGetBoolAndUnLock(jsvObjectGetChildIfExists(options, "encryptUart")))
       encryptUart = true;
+    {
+      JsVar *pair;
+      pair = jsvObjectGetChildIfExists(options, "pair");
+      if (!jsvIsUndefined(pair) && !jsvGetBool(pair)) {
+        bleStatus |= BLE_IS_NOT_PAIRABLE;
+      } else {
+        bleStatus &= ~BLE_IS_NOT_PAIRABLE;
+      }
+      jsvUnLock(pair);
+    }
     // Check for passkey
     uint8_t passkey[BLE_GAP_PASSKEY_LEN+1];
     memset(passkey, 0, sizeof(passkey));
@@ -2018,14 +2182,17 @@ void jsble_update_security() {
     if (passkey[0]) {
       pin_option.gap_opt.passkey.p_passkey = passkey;
       encryptUart = true;
+      mitmProtect = true;
     }
     uint32_t err_code =  sd_ble_opt_set(BLE_GAP_OPT_PASSKEY, &pin_option);
     jsble_check_error(err_code);
   }
-  // If UART encryption status changed, we need to update flags and restart Bluetooth
-  if (((bleStatus&BLE_ENCRYPT_UART)!=0) != encryptUart) {
+  // If UART encryption or mitm protection status changed, we need to update flags and restart Bluetooth
+  if (((bleStatus & BLE_ENCRYPT_UART) != 0) != encryptUart || ((bleStatus & BLE_SECURITY_MITM) != 0) != mitmProtect) {
     if (encryptUart) bleStatus |= BLE_ENCRYPT_UART;
     else bleStatus &= ~BLE_ENCRYPT_UART;
+    if (mitmProtect) bleStatus |= BLE_SECURITY_MITM;
+    else bleStatus &= ~BLE_SECURITY_MITM;
     // But only restart if the UART was enabled
     if (bleStatus & BLE_NUS_INITED)
       bleStatus |= BLE_NEEDS_SOFTDEVICE_RESTART;
@@ -2084,7 +2251,11 @@ static void peer_manager_init(bool erase_bonds) {
   bleStatus |= BLE_PM_INITIALISED;
 
   /* If ALL buttons are pressed at boot, clear out flash
-   * pages as well. Nice easy way to reset! */
+   pages as well. Nice easy way to reset!
+
+   We know this only happens at boot because of the
+   BLE_PM_INITIALISED check above.
+  */
   bool buttonPressed = false;
 #ifdef BTN1_PININDEX
   buttonPressed = jshPinGetValue(BTN1_PININDEX) == BTN1_ONSTATE;
@@ -2101,7 +2272,6 @@ static void peer_manager_init(bool erase_bonds) {
   if (buttonPressed) {
     peer_manager_erase_pages();
   }
-
 
   ret_code_t           err_code;
 
@@ -2175,7 +2345,7 @@ static void hids_init(uint8_t *reportPtr, size_t reportLen) {
     p_input_report->rep_ref.report_id   = HID_INPUT_REP_REF_ID;
     p_input_report->rep_ref.report_type = BLE_HIDS_REP_TYPE_INPUT;
 
-#if NRF_SD_BLE_API_VERSION>=7
+#if NRF_SD_BLE_API_VERSION>=7 || NRF5X_SDK_15_3
     p_input_report->sec.cccd_wr = SEC_JUST_WORKS;
     p_input_report->sec.wr      = SEC_JUST_WORKS;
     p_input_report->sec.rd      = SEC_JUST_WORKS;
@@ -2190,7 +2360,7 @@ static void hids_init(uint8_t *reportPtr, size_t reportLen) {
     p_output_report->rep_ref.report_id   = HID_OUTPUT_REP_REF_ID;
     p_output_report->rep_ref.report_type = BLE_HIDS_REP_TYPE_OUTPUT;
 
-#if NRF_SD_BLE_API_VERSION>=7
+#if NRF_SD_BLE_API_VERSION>=7 || NRF5X_SDK_15_3
     p_output_report->sec.wr      = SEC_JUST_WORKS;
     p_output_report->sec.rd      = SEC_JUST_WORKS;
 #else
@@ -2220,7 +2390,7 @@ static void hids_init(uint8_t *reportPtr, size_t reportLen) {
     hids_init_obj.included_services_count        = 0;
     hids_init_obj.p_included_services_array      = NULL;
 
-#if NRF_SD_BLE_API_VERSION>=7
+#if NRF_SD_BLE_API_VERSION>=7 || NRF5X_SDK_15_3
     hids_init_obj.rep_map.rd_sec         = SEC_JUST_WORKS;
     hids_init_obj.hid_information.rd_sec = SEC_JUST_WORKS;
 
@@ -2288,6 +2458,8 @@ static void services_init() {
 #if (NRF_SD_BLE_API_VERSION==3) || (NRF_SD_BLE_API_VERSION==6)
       if (bleStatus & BLE_ENCRYPT_UART)
         nus_init.encrypt = true;
+      if (bleStatus & BLE_SECURITY_MITM)
+        nus_init.mitmProtect = true;
 #else
 #if PEER_MANAGER_ENABLED
 #warning "No security on Nordic UART for this softdevice"
@@ -2314,9 +2486,11 @@ static void services_init() {
 #if ESPR_BLUETOOTH_ANCS
     bool useANCS = jsvGetBoolAndUnLock(jsvObjectGetChildIfExists(execInfo.hiddenRoot, BLE_NAME_ANCS));
     bool useAMS = jsvGetBoolAndUnLock(jsvObjectGetChildIfExists(execInfo.hiddenRoot, BLE_NAME_AMS));
-    if (useANCS || useAMS) {
+    bool useCTS = jsvGetBoolAndUnLock(jsvObjectGetChildIfExists(execInfo.hiddenRoot, BLE_NAME_CTS));
+    if (useANCS || useAMS || useCTS) {
       if (useANCS) bleStatus |= BLE_ANCS_INITED;
       if (useAMS) bleStatus |= BLE_AMS_INITED;
+      if (useCTS) bleStatus |= BLE_CTS_INITED;
       ble_ancs_init();
     }
 #endif
@@ -2463,7 +2637,7 @@ void jsble_setup_advdata(ble_advdata_t *advdata) {
 
 #if NRF_SD_BLE_API_VERSION>5
 static ble_gap_adv_data_t m_ble_gap_adv_data;
-// SoftDevice >= 6.1.0 needs this as static buffers 
+// SoftDevice >= 6.1.0 needs this as static buffers
 static uint8_t m_adv_data[BLE_GAP_ADV_SET_DATA_SIZE_MAX];
 static uint8_t m_scan_rsp_data[BLE_GAP_ADV_SET_DATA_SIZE_MAX]; // 31
 #endif
@@ -2516,14 +2690,15 @@ uint32_t jsble_advertising_update(uint8_t *advPtr, unsigned int advLen, uint8_t 
 }
 
 uint32_t jsble_advertising_start() {
+  jsDebug(DBG_INFO,"jsble_advertising_start\n");
   // try not to call from IRQ as we might want to allocate JsVars
   if (bleStatus & BLE_IS_ADVERTISING) return 0;
-  
+
 #ifndef SAVE_ON_FLASH
   /* If we're not allowed to advertise because we are connected, just return */
-  if (!(bleStatus & BLE_ADVERTISE_WHEN_CONNECTED) && jsble_has_peripheral_connection()) 
+  if (!(bleStatus & BLE_ADVERTISE_WHEN_CONNECTED) && jsble_has_peripheral_connection())
     return 0;
-#endif  
+#endif
 
   ble_advdata_t scanrsp;
 
@@ -2650,7 +2825,8 @@ uint32_t jsble_advertising_start() {
 #endif
   bleStatus |= BLE_IS_ADVERTISING;
   jsvUnLock(advDataVar);
-  bleQueueEventAndUnLock(JS_EVENT_PREFIX"advertising", jsvNewFromBool(true));
+  if (execInfo.root) // JS interpreter may not be initialised yet!
+    bleQueueEventAndUnLock(JS_EVENT_PREFIX"advertising", jsvNewFromBool(true));
   return err_code;
 }
 
@@ -2662,6 +2838,7 @@ uint32_t jsble_advertising_update_scanresponse(char *dPtr, unsigned int dLen) {
 }
 
 void jsble_advertising_stop() {
+  jsDebug(DBG_INFO,"jsble_advertising_stop\n");
   if (!(bleStatus & BLE_IS_ADVERTISING)) return;
 #if NRF_SD_BLE_API_VERSION > 5
   sd_ble_gap_adv_stop(m_adv_handle);
@@ -2674,6 +2851,7 @@ void jsble_advertising_stop() {
 
 /** Initialise the BLE stack */
  void jsble_init() {
+  jsDebug(DBG_INFO,"jsble_init\n");
    uint32_t err_code;
    ble_stack_init();
    err_code = radio_notification_init(
@@ -2727,12 +2905,14 @@ void jsble_advertising_stop() {
 
    // reset the status for things that aren't happening now we're rebooted
    bleStatus &= ~BLE_RESET_ON_SOFTDEVICE_START;
-
-   jswrap_ble_wake();
+   // if we weren't sleeping, start advertising again
+   if (!(bleStatus & BLE_IS_SLEEPING))
+    jswrap_ble_wake();
 }
 
 /** Completely deinitialise the BLE stack */
 bool jsble_kill() {
+  jsDebug(DBG_INFO,"jsble_kill\n");
   jswrap_ble_sleep();
   // BLE NUS doesn't need deinitialising (no ble_nus_kill)
   bleStatus &= ~BLE_NUS_INITED;
@@ -2740,13 +2920,15 @@ bool jsble_kill() {
   bleStatus &= ~BLE_HID_INITED;
 #if ESPR_BLUETOOTH_ANCS
   // BLE ANCS/AMS doesn't need deinitialising
-  bleStatus &= ~BLE_ANCS_OR_AMS_INITED;
+  bleStatus &= ~BLE_ANCS_AMS_OR_CTS_INITED;
 #endif
   uint32_t err_code;
 #if NRF_SD_BLE_API_VERSION < 5
   err_code = sd_softdevice_disable();
 #else
+#ifndef NRF5X_SDK_15_3
   nrf_drv_clock_lfclk_request(NULL); // https://devzone.nordicsemi.com/f/nordic-q-a/56256/disabling-the-softdevice-hangs-when-using-lfrc-with-an-active-watchdog
+#endif
   err_code = nrf_sdh_disable_request();
 #endif
   return !jsble_check_error(err_code);
@@ -2756,8 +2938,10 @@ bool jsble_kill() {
 /** Stop and restart the softdevice so that we can update the services in it -
  * both user-defined as well as UART/HID */
 void jsble_restart_softdevice(JsVar *jsFunction) {
+  jsDebug(DBG_INFO,"jsble_restart_softdevice (%s)\n", (bleStatus&BLE_IS_SLEEPING)?"sleep":"awake");
   assert(!jsble_has_connection());
   bleStatus &= ~(BLE_NEEDS_SOFTDEVICE_RESTART | BLE_SERVICES_WERE_SET);
+  bool bleWasSleeping = bleStatus & BLE_IS_SLEEPING;;
   // if we were scanning, make sure we stop
   if (bleStatus & BLE_IS_SCANNING) {
     sd_ble_gap_scan_stop();
@@ -2774,6 +2958,9 @@ void jsble_restart_softdevice(JsVar *jsFunction) {
     jshSetSystemTime(lastTime); // Softdevice resets the RTC - so we must reset our offsets
   }
   jstRestartUtilTimer(); // restart the util timer
+  if (!bleWasSleeping)
+    jswrap_ble_wake();
+  jsDebug(DBG_INFO,"jsble_restart_softdevice ends (%s)\n", (bleStatus&BLE_IS_SLEEPING)?"sleep":"awake");
 }
 
 uint32_t jsble_set_scanning(bool enabled, JsVar *options) {
@@ -3065,15 +3252,15 @@ void jsble_send_hid_input_report(uint8_t *data, int length) {
     return;
   }
   if (!jsble_has_peripheral_connection()) {
-    jsExceptionHere(JSET_ERROR, "Not connected!");
+    jsExceptionHere(JSET_ERROR, "Not connected");
     return;
   }
   if (bleStatus & BLE_IS_SENDING_HID) {
     jsExceptionHere(JSET_ERROR, "BLE HID already sending");
     return;
-  }  
+  }
   if (length > HID_KEYS_MAX_LEN) {
-    jsExceptionHere(JSET_ERROR, "BLE HID report too long - max length = %d\n", HID_KEYS_MAX_LEN);
+    jsExceptionHere(JSET_ERROR, "BLE HID report too long - max length = %d", HID_KEYS_MAX_LEN);
     return;
   }
 
@@ -3205,9 +3392,11 @@ void jsble_set_tx_power(int8_t pwr) {
 #if NRF_SD_BLE_API_VERSION > 5
   if (m_peripheral_conn_handle != BLE_CONN_HANDLE_INVALID)
     err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_CONN, m_peripheral_conn_handle, pwr);
+#if CENTRAL_LINK_COUNT>0
   for (int i=0;i<CENTRAL_LINK_COUNT;i++)
     if (m_central_conn_handles[i] != BLE_CONN_HANDLE_INVALID)
       err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_CONN, m_central_conn_handles[i], pwr);
+#endif
   if (m_adv_handle != BLE_GAP_ADV_SET_HANDLE_NOT_SET)
     err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_ADV, m_adv_handle, pwr);
   err_code = sd_ble_gap_tx_power_set(BLE_GAP_TX_POWER_ROLE_SCAN_INIT, 0/*ignored*/, pwr);
@@ -3471,6 +3660,34 @@ void jsble_central_setWhitelist(bool whitelist) {
 #endif
 }
 
+void jsble_central_eraseBonds() {
+#if PEER_MANAGER_ENABLED
+  jsble_check_error(pm_peers_delete());
+#endif
+}
+
+#if PEER_MANAGER_ENABLED
+JsVar *jsble_resolveAddress(JsVar *address) {
+  ble_gap_addr_t addr;
+  if (bleVarToAddr(address, &addr)) {
+    if (addr.addr_type == BLE_GAP_ADDR_TYPE_RANDOM_PRIVATE_RESOLVABLE) {
+      pm_peer_data_bonding_t peer_data_bonding;
+      memset(&peer_data_bonding, 0, sizeof(peer_data_bonding));
+      // iterate over all known peers
+      pm_peer_id_t peer_id = PM_PEER_ID_INVALID;
+      while ((peer_id = pm_next_peer_id_get(peer_id)) != PM_PEER_ID_INVALID) {
+        if (pm_peer_data_bonding_load(peer_id, &peer_data_bonding) == NRF_SUCCESS){
+          // address match?
+          if (im_address_resolve(&addr, &peer_data_bonding.peer_ble_id.id_info)) {
+            return bleAddrToStr(peer_data_bonding.peer_ble_id.id_addr_info);
+          }
+        }
+      }
+    }
+  }
+  return 0;
+}
+#endif // PEER_MANAGER_ENABLED
 
 #endif // BLUETOOTH
 

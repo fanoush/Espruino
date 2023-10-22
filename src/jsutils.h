@@ -27,9 +27,9 @@
 #endif
 
 #ifndef BUILDNUMBER
-#define JS_VERSION "2v18"
+#define JS_VERSION "2v19"
 #else
-#define JS_VERSION "2v18." BUILDNUMBER
+#define JS_VERSION "2v19." BUILDNUMBER
 #endif
 /*
   In code:
@@ -50,6 +50,10 @@
 #define ESPR_NO_ARROW_FN 1
 #define ESPR_NO_REGEX 1
 #define ESPR_NO_TEMPLATE_LITERAL 1
+#define ESPR_NO_SOFTWARE_SERIAL 1
+#endif
+#ifdef SAVE_ON_FLASH_EXTREME
+#define ESPR_NO_BLUETOOTH_MESSAGES 1
 #endif
 
 #ifndef alloca
@@ -261,6 +265,8 @@ See comments after JsVar in jsvar.c for more info.
 /// Max length of JSV_NAME_ strings
 #define JSVAR_DATA_STRING_NAME_LEN  4
 #endif
+/// these should be the same, but if we use sizeof in the #defines below they won't be constant
+#define JSVAR_DATA_STRING_NAME_LEN_  sizeof(size_t)
 
 
 /// Max length for a JSV_STRING, JsVar.varData.ref.refs (see comments under JsVar decl in jsvar.h)
@@ -277,13 +283,8 @@ field, but because they are bitfields we can't get pointers to them!
  * a flat string than to use a normal string... */
 #define JSV_FLAT_STRING_BREAK_EVEN (JSVAR_DATA_STRING_LEN + JSVAR_DATA_STRING_MAX_LEN)
 
+typedef uint16_t JsVarRefCounter;
 // Sanity checks
-#if JSVARREFCOUNT_BITS <= 8
-    typedef uint8_t JsVarRefCounter;
-#else
-#error "Assumed JSVARREFCOUNT_BITS was 8 or less"
-#endif
-
 #if (JSVAR_DATA_STRING_NAME_LEN + ((JSVARREF_BITS*3 + JSVARREFCOUNT_PACK_BITS)>>3)) < 8
 #pragma message "required length (bits) : 64"
 #pragma message "initial data block length (bits) : " STRINGIFY(JSVAR_DATA_STRING_NAME_LEN*8)
@@ -452,7 +453,7 @@ char charToLowerCase(char ch);
 so you can't store the value it returns in a variable and call it again.
 If jsonStyle=true, only string escapes supported by JSON are used. 'nextCh' is needed
 to ensure that certain escape combinations are avoided. For instance "\0" + "0" is NOT "\00" */
-const char *escapeCharacter(char ch, char nextCh, bool jsonStyle);
+const char *escapeCharacter(int ch, int nextCh, bool jsonStyle);
 /** Parse radix prefixes, or return 0 */
 int getRadix(const char **s);
 /// Convert a character to the hexadecimal equivalent (or -1)
@@ -623,5 +624,27 @@ size_t jsuGetFreeStack();
 typedef struct {
   short x,y,z;
 } Vector3;
+
+#ifdef ESPR_UNICODE_SUPPORT
+/// Returns true if this character denotes the start of a UTF8 sequence
+bool jsUTF8IsStartChar(char c);
+
+/// Gets the length of a unicode char sequence by looking at the first char
+unsigned int jsUTF8LengthFromChar(char c);
+
+/// Given a codepoint, figure hot how many bytes it needs for UTF8 encoding
+unsigned int jsUTF8Bytes(int codepoint);
+
+// encode a codepoint as a string, NOT null terminated (utf8 min size=4)
+unsigned int jsUTF8Encode(int codepoint, char* utf8);
+
+static ALWAYS_INLINE bool jsUnicodeIsHighSurrogate(int codepoint) {
+  return ((codepoint & 0xFC00) == 0xD800);
+}
+
+static ALWAYS_INLINE bool jsUnicodeIsLowSurrogate(int codepoint) {
+  return ((codepoint & 0xFC00) == 0xDC00);
+}
+#endif // ESPR_UNICODE_SUPPORT
 
 #endif /* JSUTILS_H_ */

@@ -123,7 +123,7 @@ void graphicsStructResetState(JsGraphics *gfx) {
   } else
 #endif
   {
-    gfx->data.fgColor = 0xFFFFFFFF;
+    gfx->data.fgColor = (gfx->data.bpp>=32) ? 0xFFFFFFFF : ((1<<gfx->data.bpp)-1);
     gfx->data.bgColor = 0;
   }
   gfx->data.fontSize = 1+JSGRAPHICS_FONTSIZE_4X6;
@@ -197,7 +197,7 @@ bool graphicsSetCallbacks(JsGraphics *gfx) {
     lcd_spi_unbuf_setCallbacks(gfx);
 #endif
   } else {
-    jsExceptionHere(JSET_INTERNALERROR, "Unknown graphics type\n");
+    // this should never happen
     assert(0);
     return false;
   }
@@ -226,7 +226,7 @@ bool graphicsGetFromVar(JsGraphics *gfx, JsVar *parent) {
 
 // Set the data variable for graphics - called initially when a graphics instance is first make
 void graphicsSetVarInitial(JsGraphics *gfx) {
-  JsVar *dataname = jsvFindChildFromString(gfx->graphicsVar, JS_HIDDEN_CHAR_STR"gfx", true);
+  JsVar *dataname = jsvFindOrAddChildFromString(gfx->graphicsVar, JS_HIDDEN_CHAR_STR"gfx");
   JsVar *data = jsvSkipName(dataname);
   if (!data) {
     data = jsvNewStringOfLength(sizeof(JsGraphicsData), NULL);
@@ -240,7 +240,7 @@ void graphicsSetVarInitial(JsGraphics *gfx) {
 
 // Set the data variable for graphics - graphics data must exist
 void graphicsSetVar(JsGraphics *gfx) {
-  JsVar *data = jsvSkipNameAndUnLock(jsvFindChildFromString(gfx->graphicsVar, JS_HIDDEN_CHAR_STR"gfx", false));
+  JsVar *data = jsvSkipNameAndUnLock(jsvFindChildFromString(gfx->graphicsVar, JS_HIDDEN_CHAR_STR"gfx"));
 #if ESPR_GRAPHICS_INTERNAL
   if (!data) {
     graphicsInternal = *gfx;
@@ -262,6 +262,7 @@ size_t graphicsGetMemoryRequired(const JsGraphics *gfx) {
 
 // If graphics is flipped or rotated then the coordinates need modifying
 void graphicsToDeviceCoordinates(const JsGraphics *gfx, int *x, int *y) {
+#ifndef DICKENS // For Dickens, we can use Bangle.lcdWr(0x36, xxx) to set the screen rotation
   if (gfx->data.flags & JSGRAPHICSFLAGS_SWAP_XY) {
     int t = *x;
     *x = *y;
@@ -269,6 +270,7 @@ void graphicsToDeviceCoordinates(const JsGraphics *gfx, int *x, int *y) {
   }
   if (gfx->data.flags & JSGRAPHICSFLAGS_INVERT_X) *x = (int)(gfx->data.width - (*x+1));
   if (gfx->data.flags & JSGRAPHICSFLAGS_INVERT_Y) *y = (int)(gfx->data.height - (*y+1));
+#endif
 }
 
 // If graphics is flipped or rotated then the coordinates need modifying. This is to go back - eg for touchscreens
@@ -284,6 +286,7 @@ void deviceToGraphicsCoordinates(const JsGraphics *gfx, int *x, int *y) {
 
 // If graphics is flipped or rotated then the coordinates need modifying
 void graphicsToDeviceCoordinates16x(const JsGraphics *gfx, int *x, int *y) {
+#ifndef DICKENS // For Dickens, we can use Bangle.lcdWr(0x36, xxx) to set the screen rotation
   if (gfx->data.flags & JSGRAPHICSFLAGS_SWAP_XY) {
     int t = *x;
     *x = *y;
@@ -291,6 +294,7 @@ void graphicsToDeviceCoordinates16x(const JsGraphics *gfx, int *x, int *y) {
   }
   if (gfx->data.flags & JSGRAPHICSFLAGS_INVERT_X) *x = (int)((gfx->data.width-1)*16 - *x);
   if (gfx->data.flags & JSGRAPHICSFLAGS_INVERT_Y) *y = (int)((gfx->data.height-1)*16 - *y);
+#endif
 }
 
 unsigned short graphicsGetWidth(const JsGraphics *gfx) {
@@ -339,7 +343,7 @@ JsGraphicsSetPixelFn graphicsGetSetPixelFn(JsGraphics *gfx) {
     return gfx->setPixel; // fast
 }
 
-/// Get a setPixel function (assuming no clipping by caller) - if all is ok it can choose a faster draw function
+/// Get a setPixel function (assuming no clipping by caller) - if all is ok it can choose a faster draw function, but it chooses a slower one if clipping is needed
 JsGraphicsSetPixelFn graphicsGetSetPixelUnclippedFn(JsGraphics *gfx, int x1, int y1, int x2, int y2) {
   if ((gfx->data.flags & JSGRAPHICSFLAGS_MAPPEDXY) ||
       graphicsSetModifiedAndClip(gfx,&x1,&y1,&x2,&y2))
@@ -354,7 +358,7 @@ uint32_t graphicsBlendColor(JsGraphics *gfx, unsigned int fg, unsigned int bg, i
   if (amt>256) amt=256;
   if (gfx->data.bpp==2 || gfx->data.bpp==4 || gfx->data.bpp==8) {
     // TODO: if our graphics instance is paletted this isn't correct!
-    return (bg*(256-amt) + fg*amt) >> 8;
+    return (bg*(256-amt) + fg*amt + 127) >> 8;
   } else if (gfx->data.bpp==16) { // Blend from bg to fg
     unsigned int b = bg;
     unsigned int br = (b>>11)&0x1F;
@@ -737,7 +741,7 @@ void graphicsDrawCircleAA(JsGraphics *gfx, int x0, int y0, int r){
   int i, x2, e2;
   r = 1-err;
   do {
-     i = 255-255*abs(err-2*(x+y)-2)/r;  
+     i = 255-255*abs(err-2*(x+y)-2)/r;
      graphicsSetPixelDeviceBlended(gfx, x0-x, y0+y, i);
      graphicsSetPixelDeviceBlended(gfx, x0-y, y0-x, i);
      graphicsSetPixelDeviceBlended(gfx, x0+x, y0-y, i);

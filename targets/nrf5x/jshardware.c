@@ -537,7 +537,7 @@ static void spiFlashReset(){
   spiFlashWriteCS(buf,1);
   buf[0] = QSPI_STD_CMD_RST;
   spiFlashWriteCS(buf,1);
-  nrf_delay_us(50); 
+  nrf_delay_us(50);
 }
 
 static void spiFlashWakeUp() {
@@ -572,7 +572,7 @@ static void spiFlashWakeUp() {
   spiFlashWriteCS(buf,1);
   nrf_delay_us(30); // Wait at least 20us for Flash IC to wake up from deep power-down
   spiFlashWriteCS(buf,1); // Might need two attempts
-  nrf_delay_us(30); 
+  nrf_delay_us(30);
   spiFlashAwake = true;
 }
 void spiFlashSleep() {
@@ -664,9 +664,12 @@ static NO_INLINE void jshPinSetFunction_int(JshPinFunction func, uint32_t pin) {
   case JSH_TIMER2:
   case JSH_TIMER3: {
       NRF_PWM_Type *pwm = nrf_get_pwm(fType);
-      pwm->PSEL.OUT[fInfo>>JSH_SHIFT_INFO] = pin;
       // FIXME: Only disable if nothing else is using it!
-      if (pin==0xFFFFFFFF) nrf_pwm_disable(pwm);
+      if (pin==0xFFFFFFFF) {
+        nrf_pwm_task_trigger(pwm, NRF_PWM_TASK_STOP);
+        nrf_pwm_disable(pwm);
+      }
+      pwm->PSEL.OUT[fInfo>>JSH_SHIFT_INFO] = pin;
       break;
     }
 #endif
@@ -1100,7 +1103,7 @@ void jshInterruptOn() {
 #if defined(BLUETOOTH)
 #if defined(NRF52_SERIES)
   __set_BASEPRI(0);
-#else  
+#else
   sd_nvic_critical_region_exit(0); // do not handle nesting, always enable interrupts
 #endif
 #else
@@ -1552,7 +1555,7 @@ JshPinFunction jshPinAnalogOutput(Pin pin, JsVarFloat value, JsVarFloat freq, Js
   }
 
   if (!func) {
-    jsExceptionHere(JSET_ERROR, "No free Hardware PWMs. Try not specifying a frequency, or using analogWrite(pin, val, {soft:true}) for Software PWM\n");
+    jsExceptionHere(JSET_ERROR, "No free Hardware PWMs. Try not specifying a frequency, or using analogWrite(pin, val, {soft:true}) for Software PWM");
     return 0;
   }
 
@@ -1677,7 +1680,11 @@ IOEventFlags jshPinWatch(Pin pin, bool shouldWatch, JshPinWatchFlags flags) {
         extiToPin[i] = PIN_UNDEFINED;
         nrf_drv_gpiote_in_event_disable(p);
         uint32_t pin_number = p;
+#if NRF_SD_BLE_API_VERSION>5
         NRF_GPIO_Type * reg = nrf_gpio_pin_port_decode(&pin_number);
+#else
+        NRF_GPIO_Type *reg = NRF_GPIO;
+#endif
         uint32_t cnf = reg->PIN_CNF[pin_number]; // get old pin config
         nrf_drv_gpiote_in_uninit(p);
         // nrf_drv_gpiote_in_uninit calls nrf_gpio_cfg_default so we must re-enable
@@ -1703,13 +1710,6 @@ void jshEnableWatchDog(JsVarFloat timeout) {
 
 void jshKickWatchDog() {
   NRF_WDT->RR[0] = 0x6E524635;
-#ifdef BANGLEJS
-  /* If we're busy and really don't want to be interrupted (eg clearing flash memory)
-   then we should *NOT* allow the home button to set EXEC_INTERRUPTED (which happens
-   if it was held, JSBT_RESET was set, and then 0.1s later it wasn't handled). */
-  void jswrap_banglejs_kickPollWatchdog();
-  jswrap_banglejs_kickPollWatchdog();
-#endif
 }
 
 /** Check the pin associated with this EXTI - return true if it is a 1 */
@@ -1739,9 +1739,13 @@ bool jshIsDeviceInitialised(IOEventFlags device) {
 void uart_startrx(int num) {
   uint32_t err_code;
   err_code = nrf_drv_uart_rx(&UART[num], &uart[num].rxBuffer[0],1);
+#ifndef SAVE_ON_FLASH
   if (err_code) jsWarn("nrf_drv_uart_rx 1 failed, error %d", err_code);
+#endif
   err_code = nrf_drv_uart_rx(&UART[num], &uart[num].rxBuffer[1],1);
+#ifndef SAVE_ON_FLASH
   if (err_code) jsWarn("nrf_drv_uart_rx 2 failed, error %d", err_code);
+#endif
 }
 
 void uart_starttx(int num) {
@@ -1756,7 +1760,9 @@ void uart_starttx(int num) {
     uart[num].isSending = true;
     uart[num].txBuffer[0] = ch;
     ret_code_t err_code = nrf_drv_uart_tx(&UART[num], uart[num].txBuffer, 1);
+#ifndef SAVE_ON_FLASH
     if (err_code) jsWarn("nrf_drv_uart_tx failed, error %d", err_code);
+#endif
   } else
     uart[num].isSending = false;
 }
@@ -1856,7 +1862,7 @@ void jshUSARTSetup(IOEventFlags device, JshUSARTInfo *inf) {
   jshSetErrorHandlingEnabled(device, inf->errorHandling);
 
   if (inf->stopbits!=1)
-    return jsExceptionHere(JSET_INTERNALERROR, "Unsupported serial stopbits length.");
+    return jsExceptionHere(JSET_INTERNALERROR, "Unsupported serial stopbits length");
 
   uart[num].isInitialised = false;
   if (inf->bytesize==8) {
@@ -1871,7 +1877,7 @@ void jshUSARTSetup(IOEventFlags device, JshUSARTInfo *inf) {
     inf->parity = 0; // no parity bit for 7 bit output
 #endif
   } else
-    return jsExceptionHere(JSET_INTERNALERROR, "Unsupported serial byte size.");
+    return jsExceptionHere(JSET_INTERNALERROR, "Unsupported serial byte size");
 
   JshPinFunction JSH_USART = JSH_USART1+(num<<JSH_SHIFT_TYPE);
 
@@ -1989,7 +1995,7 @@ void jshSPISetup(IOEventFlags device, JshSPIInfo *inf) {
   uint32_t err_code = nrf_drv_spi_init(&spi0, &spi_config, spi0EvtHandler, NULL);
 #endif
   if (err_code != NRF_SUCCESS)
-    jsExceptionHere(JSET_INTERNALERROR, "SPI Initialisation Error %d\n", err_code);
+    jsExceptionHere(JSET_INTERNALERROR, "SPI Initialisation Error %d", err_code);
 
   // nrf_drv_spi_init will set pins, but this ensures we know so can reset state later
   if (jshIsPinValid(inf->pinSCK)) {
@@ -2043,9 +2049,14 @@ int jshSPISend(IOEventFlags device, int data) {
   uint8_t rx = 0;
   spi0Sending = true;
   uint32_t err_code = nrf_drv_spi_transfer(&spi0, &tx, 1, &rx, 1);
+  if (err_code == NRF_ERROR_BUSY) {
+    jsWarn("NRF_ERROR_BUSY on SPI send - recovering");
+    nrf_drv_spi_abort(&spi0); // this should clear p_cb->transfer_in_progress which will fix NRF_ERROR_BUSY
+    err_code = nrf_drv_spi_transfer(&spi0, &tx, 1, &rx, 1);
+  }
   if (err_code != NRF_SUCCESS) {
     spi0Sending = false;
-    jsExceptionHere(JSET_INTERNALERROR, "SPI Send Error %d\n", err_code);
+    jsExceptionHere(JSET_INTERNALERROR, "SPI Send Error %d", err_code);
   }
   jshSPIWait(device);
   return rx;
@@ -2108,7 +2119,7 @@ bool jshSPISendMany(IOEventFlags device, unsigned char *tx, unsigned char *rx, s
 #endif
   if (err_code != NRF_SUCCESS) {
     spi0Sending = false;
-    jsExceptionHere(JSET_INTERNALERROR, "SPI Send Error %d\n", err_code);
+    jsExceptionHere(JSET_INTERNALERROR, "SPI Send Error %d", err_code);
     return false;
   }
   if (!callback) {
@@ -2225,7 +2236,7 @@ void jshI2CSetup(IOEventFlags device, JshI2CInfo *inf) {
     };
     err_code = nrf_drv_twis_init(twis, &config, twis_event_handler);
     if (err_code != NRF_SUCCESS)
-      jsExceptionHere(JSET_INTERNALERROR, "I2C Initialisation Error %d\n", err_code);
+      jsExceptionHere(JSET_INTERNALERROR, "I2C Initialisation Error %d", err_code);
     else
       nrf_drv_twis_enable(twis);
   } else
@@ -2244,11 +2255,11 @@ void jshI2CSetup(IOEventFlags device, JshI2CInfo *inf) {
     twi1Initialised = true;
     err_code = nrf_drv_twi_init(twi, &p_twi_config, NULL, NULL);
     if (err_code != NRF_SUCCESS)
-      jsExceptionHere(JSET_INTERNALERROR, "I2C Initialisation Error %d\n", err_code);
+      jsExceptionHere(JSET_INTERNALERROR, "I2C Initialisation Error %d", err_code);
     else
       nrf_drv_twi_enable(twi);
   }
-#endif  
+#endif
   // nrf_drv_spi_init will set pins, but this ensures we know so can reset state later
   if (jshIsPinValid(inf->pinSCL)) {
     jshPinSetFunction(inf->pinSCL, JSH_I2C1|JSH_I2C_SCL);
@@ -2266,7 +2277,7 @@ void jshI2CWrite(IOEventFlags device, unsigned char address, int nBytes, const u
   if (!twi || !jshIsDeviceInitialised(device)) return;
   uint32_t err_code = nrf_drv_twi_tx(twi, address, data, nBytes, !sendStop);
   if (err_code != NRF_SUCCESS)
-    jsExceptionHere(JSET_INTERNALERROR, "I2C Write Error %d\n", err_code);
+    jsExceptionHere(JSET_INTERNALERROR, "I2C Write Error %d", err_code);
 }
 
 void jshI2CRead(IOEventFlags device, unsigned char address, int nBytes, unsigned char *data, bool sendStop) {
@@ -2274,7 +2285,7 @@ void jshI2CRead(IOEventFlags device, unsigned char address, int nBytes, unsigned
   if (!twi || !jshIsDeviceInitialised(device)) return;
   uint32_t err_code = nrf_drv_twi_rx(twi, address, data, nBytes);
   if (err_code != NRF_SUCCESS)
-    jsExceptionHere(JSET_INTERNALERROR, "I2C Read Error %d\n", err_code);
+    jsExceptionHere(JSET_INTERNALERROR, "I2C Read Error %d", err_code);
 }
 #endif // TWI_ENABLED
 
@@ -2402,8 +2413,10 @@ bool jshFlashErasePages(uint32_t addr, uint32_t byteLength) {
         // erase all needs just one arg, but it can also take a while! handle separately
         spiFlashWriteCS(b,1);
         int timeout = WAIT_UNTIL_N_CYCLES*5;
-        while ((spiFlashStatus()&1) && !jspIsInterrupted() && (timeout--)>0)
+        while ((spiFlashStatus()&1) && !jspIsInterrupted() && (timeout--)>0) {
           jshKickWatchDog();
+          jshKickSoftWatchDog();
+        }
         if (timeout<=0 || jspIsInterrupted())
           jsExceptionHere(JSET_INTERNALERROR, "Timeout on jshFlashErasePage (all)");
       } else {
@@ -2414,6 +2427,7 @@ bool jshFlashErasePages(uint32_t addr, uint32_t byteLength) {
       addr += erasedBytes;
       // Erasing can take a while, so kick the watchdog throughout
       jshKickWatchDog();
+      jshKickSoftWatchDog();
     }
     return !jspIsInterrupted();
   }
@@ -2438,6 +2452,7 @@ bool jshFlashErasePages(uint32_t addr, uint32_t byteLength) {
     startAddr += 4096;
     // Erasing can take a while, so kick the watchdog throughout
     jshKickWatchDog();
+    jshKickSoftWatchDog();
   }
   return !jspIsInterrupted();
 }
@@ -2460,7 +2475,7 @@ void jshFlashRead(void * buf, uint32_t addr, uint32_t len) {
         || (nrf_gpio_pin_out_read((uint32_t)pinInfo[SPIFLASH_PIN_CS].pin))
 #else
         /* our internal state that no read is pending = CS is high */
-        || spiFlashLastAddress==0 
+        || spiFlashLastAddress==0
 #endif
        ) {
       NRF_GPIO_PIN_SET_FAST((uint32_t)pinInfo[SPIFLASH_PIN_CS].pin);
@@ -2624,7 +2639,7 @@ void jshFlashWrite(void * buf, uint32_t addr, uint32_t len) {
     WAIT_UNTIL(!flashIsBusy, "jshFlashWrite");
   }
   if (err!=NRF_SUCCESS)
-    jsExceptionHere(JSET_INTERNALERROR,"NRF ERROR %d", err);
+    jsExceptionHere(JSET_INTERNALERROR,"NRF ERROR 0x%x", err);
 }
 
 // Just pass data through, since we can access flash at the same address we wrote it

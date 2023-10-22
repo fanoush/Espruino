@@ -11,7 +11,7 @@
  * Platform Specific entry point
  * ----------------------------------------------------------------------------
  */
- 
+
 #include "platform_config.h"
 #include "jsinteractive.h"
 #include "jshardware.h"
@@ -28,14 +28,15 @@ int main() {
   jswHWInit();
 
   bool buttonState = false;
-#ifdef BTN1_PININDEX
+#ifdef DICKENS
+  buttonState = jshPinGetValue(BTN3_PININDEX) == BTN3_ONSTATE && jshPinGetValue(BTN4_PININDEX) == BTN4_ONSTATE; // Hold BTN3 and BTN4 to skip autoload
+#elif defined(BTN1_PININDEX)
   buttonState = jshPinGetValue(BTN1_PININDEX) == BTN1_ONSTATE;
 #endif
-  jsvInit(0);
+  jsvInit(JSVAR_CACHE_SIZE);
   jsiInit(!buttonState /* load from flash by default */); // pressing USER button skips autoload
 
-  while (1) 
-  {
+  while (1) {
     jsiLoop();
   }
   //jsiKill();
@@ -43,8 +44,3 @@ int main() {
   //jshKill();
 }
 
-#ifdef LD_NOSTARTFILES
-void _start(){
-  main();
-}
-#endif

@@ -29,12 +29,12 @@
 #define DBG(...)
 #endif
 
-const int STORAGEFILE_CHUNKSIZE = 
+const int STORAGEFILE_CHUNKSIZE =
 #if FLASH_SAVED_CODE_LENGTH < 1000000
   // for normal devices
   (((FLASH_PAGE_SIZE<4096)?FLASH_PAGE_SIZE:4096) - sizeof(JsfFileHeader)); // use 32 for testing
 #else
-  // where we have large external flash (eg Bangle.js), choose a chunk size much bigger than the 
+  // where we have large external flash (eg Bangle.js), choose a chunk size much bigger than the
   // page size. This allows us to have less chunks around, and to store much bigger files.
   (FLASH_PAGE_SIZE*10) - sizeof(JsfFileHeader);
 #endif
@@ -142,7 +142,10 @@ JsVar *jswrap_storage_read(JsVar *name, int offset, int length) {
     ["noExceptions","bool","If true and the JSON is not valid, just return `undefined` - otherwise an `Exception` is thrown"]
   ],
   "return" : ["JsVar","An object containing parsed JSON from the file, or undefined"],
-  "typescript" : "readJSON(name: string, noExceptions: ShortBoolean): any;"
+  "typescript" : [
+    "function readJSON(name: string, noExceptions?: false | 0): unknown;",
+    "function readJSON(name: string, noExceptions?: ShortBoolean): unknown | undefined;"
+  ]
 }
 Read a file from the flash storage area that has been written with
 `require("Storage").write(...)`, and parse JSON in it into a JavaScript object.
@@ -160,7 +163,7 @@ JsVar *jswrap_storage_readJSON(JsVar *name, bool noExceptions) {
   jsvUnLock(v);
   if (noExceptions) {
     jsvUnLock(jspGetException());
-    execInfo.execute &= ~EXEC_EXCEPTION;
+    execInfo.execute &= (JsExecFlags)~EXEC_EXCEPTION;
   }
   return r;
 }
@@ -355,7 +358,7 @@ List all files in the flash storage area matching the specified regex (ignores
 StorageFiles), and then hash their filenames *and* file locations.
 
 Identical files may have different hashes (e.g. if Storage is compacted and the
-file moves) but the changes of different files having the same hash are
+file moves) but the chances of different files having the same hash are
 extremely small.
 
 ```
@@ -370,7 +373,7 @@ instance the bootloader will add all `.boot.js` files together into a single
 `.boot0` file, but it needs to know quickly whether anything has changed.
  */
 JsVarInt jswrap_storage_hash(JsVar *regex) {
-  return jsfHashFiles(regex, 0, JSFF_STORAGEFILE);
+  return (JsVarInt)jsfHashFiles(regex, 0, JSFF_STORAGEFILE);
 }
 
 /*JSON{
@@ -378,6 +381,9 @@ JsVarInt jswrap_storage_hash(JsVar *regex) {
   "ifndef" : "SAVE_ON_FLASH",
   "class" : "Storage",
   "name" : "compact",
+  "params" : [
+    ["showMessage","bool","[optional] If true, an overlay message will be displayed on the screen while compaction is happening. Default is false."]
+  ],
   "generate" : "jswrap_storage_compact"
 }
 The Flash Storage system is journaling. To make the most of the limited write
@@ -394,8 +400,8 @@ become garbled when compaction happens. To avoid this, call `eraseFiles` before
 uploading data that you intend to reference to ensure that uploaded files are
 right at the start of flash and cannot be compacted further.
  */
-void jswrap_storage_compact() {
-  jsfCompact();
+void jswrap_storage_compact(bool showMessage) {
+  jsfCompact(showMessage);
 }
 
 /*JSON{
@@ -417,15 +423,24 @@ void jswrap_storage_debug() {
   "ifndef" : "SAVE_ON_FLASH",
   "class" : "Storage",
   "name" : "getFree",
+  "params" : [
+    ["checkInternalFlash","bool","Check the internal flash (rather than external SPI flash).  Default false, so will check external storage"]
+  ],  
   "generate" : "jswrap_storage_getFree",
   "return" : ["int","The amount of free bytes"]
 }
 Return the amount of free bytes available in Storage. Due to fragmentation there
 may be more bytes available, but this represents the maximum size of file that
 can be written.
+
+**NOTE:** `checkInternalFlash` is only useful on DICKENS devices - other devices don't use two different flash banks
  */
-int jswrap_storage_getFree() {
-  return (int)jsfGetStorageStats(0,true).free;
+int jswrap_storage_getFree(bool checkInternalFlash) {
+  uint32_t addr = 0;
+#ifdef FLASH_SAVED_CODE2_START
+  addr = checkInternalFlash ? FLASH_SAVED_CODE_START : FLASH_SAVED_CODE2_START;
+#endif
+  return (int)jsfGetStorageStats(addr,true).free;
 }
 
 /*JSON{
@@ -433,6 +448,9 @@ int jswrap_storage_getFree() {
   "ifndef" : "SAVE_ON_FLASH",
   "class" : "Storage",
   "name" : "getStats",
+  "params" : [
+    ["checkInternalFlash","bool","Check the internal flash (rather than external SPI flash).  Default false, so will check external storage"]
+  ],  
   "generate" : "jswrap_storage_getStats",
   "return" : ["JsVar","An object containing info about the current Storage system"]
 }
@@ -448,17 +466,24 @@ Returns:
   trashCount // How many trash files do we have? (can be cleared with .compact)
 }
 ```
+
+**NOTE:** `checkInternalFlash` is only useful on DICKENS devices - other devices don't use two different flash banks
  */
-JsVar *jswrap_storage_getStats() {
+JsVar *jswrap_storage_getStats(bool checkInternalFlash) {
   JsVar *o = jsvNewObject();
   if (!o) return NULL;
-  JsfStorageStats stats = jsfGetStorageStats(0, true);
-  jsvObjectSetChildAndUnLock(o, "totalBytes", jsvNewFromInteger(stats.total));
-  jsvObjectSetChildAndUnLock(o, "freeBytes", jsvNewFromInteger(stats.free));
-  jsvObjectSetChildAndUnLock(o, "fileBytes", jsvNewFromInteger(stats.fileBytes));
-  jsvObjectSetChildAndUnLock(o, "fileCount", jsvNewFromInteger(stats.fileCount));
-  jsvObjectSetChildAndUnLock(o, "trashBytes", jsvNewFromInteger(stats.trashBytes));
-  jsvObjectSetChildAndUnLock(o, "trashCount", jsvNewFromInteger(stats.trashCount));
+  uint32_t addr = 0;
+#ifdef FLASH_SAVED_CODE2_START
+  addr = checkInternalFlash ? FLASH_SAVED_CODE_START : FLASH_SAVED_CODE2_START;
+  
+#endif  
+  JsfStorageStats stats = jsfGetStorageStats(addr, true);
+  jsvObjectSetChildAndUnLock(o, "totalBytes", jsvNewFromInteger((JsVarInt)stats.total));
+  jsvObjectSetChildAndUnLock(o, "freeBytes", jsvNewFromInteger((JsVarInt)stats.free));
+  jsvObjectSetChildAndUnLock(o, "fileBytes", jsvNewFromInteger((JsVarInt)stats.fileBytes));
+  jsvObjectSetChildAndUnLock(o, "fileCount", jsvNewFromInteger((JsVarInt)stats.fileCount));
+  jsvObjectSetChildAndUnLock(o, "trashBytes", jsvNewFromInteger((JsVarInt)stats.trashBytes));
+  jsvObjectSetChildAndUnLock(o, "trashCount", jsvNewFromInteger((JsVarInt)stats.trashCount));
   return o;
 }
 
@@ -519,7 +544,7 @@ JsVar *jswrap_storage_open(JsVar *name, JsVar *modeVar) {
   JsfFileName fname = jsfNameFromVar(n);
   int fnamei = sizeof(fname)-1;
   while (fnamei && fname.c[fnamei-1]==0) fnamei--;
-  fname.c[fnamei]=chunk;
+  fname.c[fnamei]=(char)chunk;
   jsvObjectSetChildAndUnLock(f,"name",n);
 
   int offset = 0; // offset in file
@@ -531,30 +556,34 @@ JsVar *jswrap_storage_open(JsVar *name, JsVar *modeVar) {
       addr = 0;
     }
   }
-  uint32_t fileLen = addr ? jsfGetFileSize(&header) : 0;
+  int fileLen = addr ? (int)jsfGetFileSize(&header) : 0;
   if (mode=='a') { // append
     // Find the last free page (eg it has 0xFF at the end)
     unsigned char lastCh = 255;
     if (addr) jshFlashRead(&lastCh, addr+jsfGetFileSize(&header)-1, 1);
     while (addr && lastCh!=255 && chunk<255) {
       chunk++;
-      fname.c[fnamei]=chunk;
+      fname.c[fnamei]=(char)chunk;
       addr = jsfFindFile(fname, &header);
-      fileLen = jsfGetFileSize(&header);
-      if (addr) jshFlashRead(&lastCh, addr+jsfGetFileSize(&header)-1, 1);
+      if (addr) {
+        fileLen = (int)jsfGetFileSize(&header);
+        jshFlashRead(&lastCh, addr+fileLen-1, 1);
+      } else {
+        fileLen = 0;
+      }
     }
     if (addr) {
       // if we have a page, try and find the end of it
       char buf[64];
       bool foundEnd = false;
       while (!foundEnd) {
-        int l = fileLen - offset;
+        int l = (int)fileLen - offset;
         if (l<=0) {
           foundEnd = true;
           break;
         }
         if (l>(int)sizeof(buf)) l=(int)sizeof(buf);
-        jshFlashRead(buf, addr+offset, l);
+        jshFlashRead(buf, addr+(uint32_t)offset, (uint32_t)l);
         for (int i=0;i<l;i++) {
           if (buf[i]==(char)255) {
             l = i;
@@ -574,8 +603,6 @@ JsVar *jswrap_storage_open(JsVar *name, JsVar *modeVar) {
   DBG("Open %j Chunk %d Offset %d addr 0x%08x len %d\n",name,chunk,offset,addr,fileLen);
   jsvObjectSetChildAndUnLock(f,"chunk",jsvNewFromInteger(chunk));
   jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
-  jsvObjectSetChildAndUnLock(f,"addr",jsvNewFromInteger(addr));
-  jsvObjectSetChildAndUnLock(f,"len",jsvNewFromInteger(fileLen));
   jsvObjectSetChildAndUnLock(f,"mode",jsvNewFromInteger(mode));
 
   return f;
@@ -603,21 +630,22 @@ This means that while `StorageFile` files exist in the same area as those from
 `Storage`, they should be read using `Storage.open` (and not `Storage.read`).
 
 ```
-f = s.open("foobar","w");
+f = require("Storage").open("foobar","w");
 f.write("Hell");
 f.write("o World\n");
 f.write("Hello\n");
 f.write("World 2\n");
+f.write("Hello World 3\n");
 // there's no need to call 'close'
 // then
-f = s.open("foobar","r");
+f = require("Storage").open("foobar","r");
 f.read(13) // "Hello World\nH"
 f.read(13) // "ello\nWorld 2\n"
 f.read(13) // "Hello World 3"
 f.read(13) // "\n"
 f.read(13) // undefined
 // or
-f = s.open("foobar","r");
+f = require("Storage").open("foobar","r");
 f.readLine() // "Hello World\n"
 f.readLine() // "Hello\n"
 f.readLine() // "World 2\n"
@@ -640,15 +668,16 @@ JsVar *jswrap_storagefile_read_internal(JsVar *f, int len) {
     return 0;
   }
 
-  uint32_t addr = (uint32_t)jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"addr"));
-  if (!addr) return 0; // end of file
-  int offset = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"offset"));
-  int fileLen = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"len"));
   int chunk = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"chunk"));
   JsfFileName fname = jsfNameFromVarAndUnLock(jsvObjectGetChildIfExists(f,"name"));
   int fnamei = sizeof(fname)-1;
   while (fnamei && fname.c[fnamei-1]==0) fnamei--;
-  fname.c[fnamei]=chunk;
+  fname.c[fnamei]=(char)chunk;
+  JsfFileHeader header;
+  uint32_t addr = jsfFindFile(fname, &header);
+  if (!addr) return 0; // end of file/no file chunk found
+  int fileLen = (int)jsfGetFileSize(&header);
+  int offset = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"offset"));
 
   JsVar *result = 0;
   char buf[32];
@@ -658,16 +687,13 @@ JsVar *jswrap_storagefile_read_internal(JsVar *f, int len) {
     if (remaining<=0) { // next page
       offset = 0;
       if (chunk==255) {
-        addr=0;
+        addr=0; // end of file!
       } else {
         chunk++;
-        fname.c[fnamei]=chunk;
-        JsfFileHeader header;
+        fname.c[fnamei]=(char)chunk;
         addr = jsfFindFile(fname, &header);
-        fileLen = jsfGetFileSize(&header);
-        jsvObjectSetChildAndUnLock(f,"len",jsvNewFromInteger(fileLen));
+        fileLen = (int)jsfGetFileSize(&header);
       }
-      jsvObjectSetChildAndUnLock(f,"addr",jsvNewFromInteger(addr));
       jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
       jsvObjectSetChildAndUnLock(f,"chunk",jsvNewFromInteger(chunk));
       remaining = fileLen;
@@ -679,7 +705,7 @@ JsVar *jswrap_storagefile_read_internal(JsVar *f, int len) {
     int l = len;
     if (l>(int)sizeof(buf)) l=(int)sizeof(buf);
     if (l>remaining) l=remaining;
-    jshFlashRead(buf, addr+offset, l);
+    jshFlashRead(buf, addr+(uint32_t)offset, (uint32_t)l);
     for (int i=0;i<l;i++) {
       if (buf[i]==(char)255) {
         // end of file!
@@ -699,7 +725,7 @@ JsVar *jswrap_storagefile_read_internal(JsVar *f, int len) {
     if (!result)
       result = jsvNewFromEmptyString();
     if (result)
-      jsvAppendStringBuf(result,buf,l);
+      jsvAppendStringBuf(result,buf,(size_t)l);
 
     len -= l;
     offset += l;
@@ -767,7 +793,7 @@ int jswrap_storagefile_getLength(JsVar *f) {
   int fnamei = sizeof(fname)-1;
   while (fnamei && fname.c[fnamei-1]==0) fnamei--;
   int chunk = 1;
-  fname.c[fnamei]=chunk;
+  fname.c[fnamei]=(char)chunk;
 
   int length = 0; // actual length
   int offset = 0; // offset in file
@@ -777,9 +803,9 @@ int jswrap_storagefile_getLength(JsVar *f) {
   unsigned char lastCh = 255;
   if (addr) jshFlashRead(&lastCh, addr+jsfGetFileSize(&header)-1, 1);
   while (addr && lastCh!=255 && chunk<255) {
-    length += jsfGetFileSize(&header);
+    length += (int)jsfGetFileSize(&header);
     chunk++;
-    fname.c[fnamei]=chunk;
+    fname.c[fnamei]=(char)chunk;
     addr = jsfFindFile(fname, &header);
     if (addr) jshFlashRead(&lastCh, addr+jsfGetFileSize(&header)-1, 1);
   }
@@ -788,13 +814,13 @@ int jswrap_storagefile_getLength(JsVar *f) {
     char buf[64];
     bool foundEnd = false;
     while (!foundEnd) {
-      int l = jsfGetFileSize(&header) - offset;
+      int l = (int)jsfGetFileSize(&header) - offset;
       if (l<=0) {
         foundEnd = true;
         break;
       }
       if (l>(int)sizeof(buf)) l=(int)sizeof(buf);
-      jshFlashRead(buf, addr+offset, l);
+      jshFlashRead(buf, addr+(uint32_t)offset, (uint32_t)l);
       for (int i=0;i<l;i++) {
         if (buf[i]==(char)255) {
           l = i;
@@ -835,58 +861,54 @@ void jswrap_storagefile_write(JsVar *f, JsVar *_data) {
   JsVar *data = jsvAsString(_data);
   if (!data) return;
   size_t len = jsvGetStringLength(data);
-  if (len==0) return;
+  if (len==0) {
+    jsvUnLock(data);
+    return;
+  }
   int offset = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"offset"));
-  int fileLen = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"len"));
   int chunk = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"chunk"));
   JsfFileName fname = jsfNameFromVarAndUnLock(jsvObjectGetChildIfExists(f,"name"));
   int fnamei = sizeof(fname)-1;
   while (fnamei && fname.c[fnamei-1]==0) fnamei--;
   //DBG("Filename[%d]=%d\n",fnamei,chunk);
-  fname.c[fnamei]=chunk;
-  uint32_t addr = (uint32_t)jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(f,"addr"));
+  fname.c[fnamei]=(char)chunk;
+
+  JsfFileHeader header;
+  uint32_t addr = jsfFindFile(fname, &header);
+  int fileLen = addr ? (int)jsfGetFileSize(&header) : 0;
+
   DBG("Write Chunk %d Offset %d addr 0x%08x\n",chunk,offset,addr);
-  int remaining = fileLen - offset;
-  if (addr) {
-    JsfFileHeader header;
-    jshFlashRead(&header, addr-(uint32_t)sizeof(JsfFileHeader), sizeof(JsfFileHeader));
-    if (memcmp(&header.name, &fname, fnamei+1)!=0) {
-      addr = jsfFindFile(fname, &header);
-      if (!addr) {
-        jsExceptionHere(JSET_ERROR, "File deleted while writing!");
-        return;
-      } else {
-        jsvObjectSetChildAndUnLock(f,"addr",jsvNewFromInteger(addr));
-      }
-    }
-  } else {
+  if (!addr) {
     DBG("Write Create Chunk\n");
+    // What if data length > the chunk size? jsfWriteFile fails with error currently
     if (jsfWriteFile(fname, data, JSFF_STORAGEFILE, 0, STORAGEFILE_CHUNKSIZE)) {
-      JsfFileHeader header;
       addr = jsfFindFile(fname, &header);
-      fileLen = jsfGetFileSize(&header);
-      offset = len;
+      fileLen = (int)jsfGetFileSize(&header);
+      offset = (int)len;
       jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
-      jsvObjectSetChildAndUnLock(f,"len",jsvNewFromInteger(fileLen));
-      jsvObjectSetChildAndUnLock(f,"addr",jsvNewFromInteger(addr));
     } else {
+      DBG("Write Create Chunk FAILED\n");
       // there would already have been an exception
+      jsvObjectSetChildAndUnLock(f,"mode",jsvNewFromInteger(0)); // set mode to 0 so no more writing
     }
     jsvUnLock(data);
     return;
   }
+  int remaining = fileLen - offset;
   if ((int)len<remaining) {
     DBG("Write Append Chunk\n");
     // Great, it all fits in
-    jswrap_flash_write(data, addr+offset);
-    offset += len;
+    jswrap_flash_write(data, (int)addr+offset);
+    offset += (int)len;
     jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
   } else {
-    DBG("Write Append Chunk and create new\n");
+    DBG("Write Append Chunk and create new file\n");
     // Fill up this page, do part of old page
     // End of this page
-    JsVar *part = jsvNewFromStringVar(data,0,remaining);
-    jswrap_flash_write(part, addr+offset);
+    JsVar *part = jsvNewFromStringVar(data,0,(size_t)remaining);
+    jswrap_flash_write(part, (int)addr+offset);
+    offset += remaining; // update offset now we've written
+    jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
     jsvUnLock(part);
     // Next page
     if (chunk==255) {
@@ -895,26 +917,20 @@ void jswrap_storagefile_write(JsVar *f, JsVar *_data) {
       return;
     } else {
       chunk++;
-      fname.c[fnamei]=chunk;
-      jsvObjectSetChildAndUnLock(f,"chunk",jsvNewFromInteger(chunk));
+      fname.c[fnamei]=(char)chunk;
     }
     // Write Next page
-    part = jsvNewFromStringVar(data,remaining,JSVAPPENDSTRINGVAR_MAXLENGTH);
+    part = jsvNewFromStringVar(data,(size_t)remaining,JSVAPPENDSTRINGVAR_MAXLENGTH);
     if (jsfWriteFile(fname, part, JSFF_STORAGEFILE, 0, STORAGEFILE_CHUNKSIZE)) {
-      JsfFileHeader header;
-      addr = jsfFindFile(fname, &header);
-      fileLen = jsfGetFileSize(&header);
-      offset = len;
+      offset = (int)jsvGetStringLength(part);
+      jsvObjectSetChildAndUnLock(f,"chunk",jsvNewFromInteger(chunk));
       jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
-      jsvObjectSetChildAndUnLock(f,"len",jsvNewFromInteger(fileLen));
-      jsvObjectSetChildAndUnLock(f,"addr",jsvNewFromInteger(addr));
     } else {
-      jsvUnLock(data);
-      return; // there would already have been an exception
+      // there would already have been an exception - no need to return
+      // we can free data up below
+      jsvObjectSetChildAndUnLock(f,"mode",jsvNewFromInteger(0)); // set mode to 0 so no more writing
     }
-    offset = jsvGetStringLength(part);
     jsvUnLock(part);
-    jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(offset));
   }
   jsvUnLock(data);
 }
@@ -936,14 +952,13 @@ void jswrap_storagefile_erase(JsVar *f) {
   int chunk = 1;
   bool ok = true;
   while (ok) {
-    fname.c[fnamei]=chunk;
+    fname.c[fnamei]=(char)chunk;
     ok = jsfEraseFile(fname);
     chunk++;
   }
   // reset everything
   jsvObjectSetChildAndUnLock(f,"chunk",jsvNewFromInteger(1));
   jsvObjectSetChildAndUnLock(f,"offset",jsvNewFromInteger(0));
-  jsvObjectSetChildAndUnLock(f,"addr",jsvNewFromInteger(0));
   jsvObjectSetChildAndUnLock(f,"mode",jsvNewFromInteger(0));
 }
 

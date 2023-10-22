@@ -63,6 +63,9 @@ typedef struct JsvStringIterator {
   size_t varIndex; ///< index in string of the start of this var
   JsVar *var; ///< current StringExt we're looking at
   char  *ptr; ///< a pointer to string data
+#ifdef ESPR_UNICODE_SUPPORT
+  bool isUTF8; ///< Is this string UTF8 or not?
+#endif
 #ifdef SPIFLASH_BASE // when using flash strings, we need somewhere to put the data
   char flashStringBuffer[ESPR_JSVAR_FLASH_BUFFER_SIZE];
 #endif
@@ -71,8 +74,11 @@ typedef struct JsvStringIterator {
 // slight hack to ensure we can use string iterator with const JsVars
 #define jsvStringIteratorNewConst(it,str,startIdx) jsvStringIteratorNew(it, (JsVar*)str, startIdx)
 
-/// Create a new String iterator from a string, starting from a specific character. NOTE: This does not keep a lock to the first element, so make sure you do or the string will be freed!
+/// Create a new String iterator from a string, starting from a specific character (in the non-UTF8 string). NOTE: This does not keep a lock to the first element, so make sure you do or the string will be freed!
 void jsvStringIteratorNew(JsvStringIterator *it, JsVar *str, size_t startIdx);
+
+/// Create a new String iterator from a string, starting from a specific character (ensures start character matches with actual UTF8 char number)
+void jsvStringIteratorNewUTF8(JsvStringIterator *it, JsVar *str, size_t startIdx);
 
 /// Clone the string iterator
 void jsvStringIteratorClone(JsvStringIterator *dstit, JsvStringIterator *it);
@@ -85,6 +91,9 @@ static ALWAYS_INLINE char jsvStringIteratorGetChar(JsvStringIterator *it) {
 
 /// Gets the current character (or 0) and increment iterator. Not inlined for speed
 char jsvStringIteratorGetCharAndNext(JsvStringIterator *it);
+
+// Get the unicode codepoint, and also return the unicode string in unicodeStr (if non-null) and length in unicodeStrLen (if non-null)
+int jsvStringIteratorGetUTF8CharAndNext(JsvStringIterator *it);
 
 /// Gets the current (>=0) character (or -1)
 int jsvStringIteratorGetCharOrMinusOne(JsvStringIterator *it);
@@ -100,13 +109,16 @@ void jsvStringIteratorSetChar(JsvStringIterator *it, char c);
 /// Sets a character (will not extend the string - just overwrites) and moves on to next character
 void jsvStringIteratorSetCharAndNext(JsvStringIterator *it, char c);
 
-/// Gets the current index in the string
+/// Gets the current index in the string (returns a non-UTF8 index)
 static ALWAYS_INLINE size_t jsvStringIteratorGetIndex(JsvStringIterator *it) {
   return it->varIndex + it->charIdx;
 }
 
-/// Move to next character
+/// Move to next character (does not honour unicode)
 void jsvStringIteratorNext(JsvStringIterator *it);
+
+/// Move to next character, skipping unicode chars correctly
+void jsvStringIteratorNextUTF8(JsvStringIterator *it);
 
 /// Returns a pointer to the next block of data and its length, and moves on to the data after
 void jsvStringIteratorGetPtrAndNext(JsvStringIterator *it, unsigned char **data, unsigned int *len);
@@ -165,8 +177,11 @@ static ALWAYS_INLINE void jsvStringIteratorNextInline(JsvStringIterator *it) {
 /// Go to the end of the string iterator - for use with jsvStringIteratorAppend
 void jsvStringIteratorGotoEnd(JsvStringIterator *it);
 
-/// Go to the given position in the string iterator. Needs the string again in case we're going back and need to start from the beginning
+/// Go to the given (non-UTF8) position in the string iterator. Needs the string again in case we're going back and need to start from the beginning
 void jsvStringIteratorGoto(JsvStringIterator *it, JsVar *str, size_t startIdx);
+
+/// Go to the given UTF8 position in the string iterator. Needs the string again in case we're going back and need to start from the beginning
+void jsvStringIteratorGotoUTF8(JsvStringIterator *it, JsVar *str, size_t idx);
 
 /// Append a character TO THE END of a string iterator
 void jsvStringIteratorAppend(JsvStringIterator *it, char ch);
@@ -261,10 +276,17 @@ typedef struct {
   JsVarInt index; // index when using JSVI_FULLARRAY
 } JsvIteratorObj;
 
+typedef struct {
+  JsvStringIterator str; // iterator for underlying string
+  JsVarInt index; // char index (because it's different from StringIterator index)
+  int currentCh; // current character code
+} JsvIteratorUTF8;
+
 union JsvIteratorUnion {
   JsvStringIterator str;
   JsvIteratorObj obj;
   JsvArrayBufferIterator buf;
+  JsvIteratorUTF8 unicode;
 };
 
 /** General Purpose iterator, for Strings, Arrays, Objects, Typed Arrays */
@@ -275,6 +297,7 @@ typedef struct JsvIterator {
     JSVI_OBJECT,
     JSVI_ARRAYBUFFER,
     JSVI_FULLARRAY, // iterate over ALL array items - including not defined
+    JSVI_UNICODE // A UTF8 string (actual string was stored in firstchild)
   } type;
   union JsvIteratorUnion it;
 } JsvIterator;

@@ -52,61 +52,80 @@ bool isIDString(const char *s) {
   return true;
 }
 
-
+// convert a number 0..15 to a hex char (this looks at only bottom 4 bits)
+char dtohex(int d) {
+  d &= 15;
+  return (char)((d<10)?('0'+d):('A'+d-10));
+}
 
 char charToUpperCase(char ch) {
-  return (char)(((ch>=97 && ch<=122) || 
-    ((unsigned)ch>=224 && (unsigned)ch<=246) || 
+  return (char)(((ch>=97 && ch<=122) ||
+    ((unsigned)ch>=224 && (unsigned)ch<=246) ||
     ((unsigned)ch>=248 && (unsigned)ch<=254)) ? ch - 32 : ch);
 } // a-z, à-ö, ø-þ
 
 char charToLowerCase(char ch) {
-  return (char)(((ch>=65 && ch<=90) || 
-    ((unsigned)ch>=192 && (unsigned)ch<=214) || 
+  return (char)(((ch>=65 && ch<=90) ||
+    ((unsigned)ch>=192 && (unsigned)ch<=214) ||
     ((unsigned)ch>=216 && (unsigned)ch<=222))  ? ch + 32 : ch);
 } // A-Z, À-Ö, Ø-Þ
+
+static char* numericEscapeChar(char *dst, int ch, bool useUnicode) {
+  *(dst++) = '\\';
+  if (useUnicode) {
+    *(dst++) ='u';
+    *(dst++) = dtohex(ch>>12);
+    *(dst++) = dtohex(ch>>8);
+  } else {
+    *(dst++) = 'x';
+  }
+  *(dst++) = dtohex(ch>>4);
+  *(dst++) = dtohex(ch);
+  return dst;
+}
 
 /** escape a character - if it is required. This may return a reference to a static array,
 so you can't store the value it returns in a variable and call it again.
 If jsonStyle=true, only string escapes supported by JSON are used */
-const char *escapeCharacter(char ch, char nextCh, bool jsonStyle) {
-  if (ch=='\b') return "\\b"; // 8
-  if (ch=='\t') return "\\t"; // 9
+const char *escapeCharacter(int ch, int nextCh, bool jsonStyle) {
   if (ch=='\n') return "\\n"; // A
+  if (ch=='\t') return "\\t"; // 9
+#ifndef SAVE_ON_FLASH_EXTREME
+  if (ch=='\b') return "\\b"; // 8
   if (ch=='\v' && !jsonStyle) return "\\v"; // B
   if (ch=='\f') return "\\f"; // C
   if (ch=='\r') return "\\r"; // D
+#endif
   if (ch=='\\') return "\\\\";
   if (ch=='"') return "\\\"";
-  static char buf[7];
-  unsigned char uch = (unsigned char)ch;
-  if (uch<8 && !jsonStyle && (nextCh<'0' || nextCh>'7')) {
+  static char buf[14]; // for surrogates
+#ifndef SAVE_ON_FLASH_EXTREME
+  if (ch<8 && !jsonStyle && (nextCh<'0' || nextCh>'7')) { // try and
     // encode less than 8 as \#
     buf[0]='\\';
-    buf[1] = (char)('0'+uch);
+    buf[1] = (char)('0'+ch);
     buf[2] = 0;
     return buf;
-  } else if (uch<32 || uch>=127) {
+  } else
+#endif
+  if (ch<32 || ch>=127) {
     /** just encode as hex - it's more understandable
      * and doesn't have the issue of "\16"+"1" != "\161" */
-    buf[0]='\\';
-    int o=2;
-    if (jsonStyle) {
-      buf[1]='u';
-      buf[o++] = '0';
-      buf[o++] = '0';
-    } else {
-      buf[1]='x';
+    char *p = buf;
+#ifdef ESPR_UNICODE_SUPPORT
+    if (ch >= 0x10000) { // we need surrogates
+      ch -= 0x10000;
+      p = numericEscapeChar(p, 0xD800 | ((ch>>10)&0x03FF), true); // high surrogate
+      ch = 0xDC00 | (ch & 0x03FF); // low surrogate
+      jsonStyle = true; // force /u output
     }
-    int n = (uch>>4)&15;
-    buf[o++] = (char)((n<10)?('0'+n):('A'+n-10));
-    n=uch&15;
-    buf[o++] = (char)((n<10)?('0'+n):('A'+n-10));
-    buf[o++] = 0;
+#endif
+    p = numericEscapeChar(p, ch, jsonStyle || ch>255);
+    *p = 0;
     return buf;
   }
   buf[1] = 0;
-  buf[0] = ch;
+  buf[0] = (char)ch;
   return buf;
 }
 
@@ -684,7 +703,7 @@ void ftoa_bounded_extra(JsVarFloat val,char *str, size_t len, int radix, int fra
         int v = (int)(val+((fractionalDigits==1) ? 0.5 : 0.00000001) );
         val = (val-v)*radix;
 	if (v==radix) v=radix-1;
-        if (!hasPt) {	
+        if (!hasPt) {
 	  hasPt = true;
           if (--len <= 0) { *str=0; return; } // bounds check
           *(str++)='.';
@@ -786,6 +805,7 @@ void vcbprintf(
         user_callback(buf,user_data);
         break;
       }
+      case 'i': // Added to support some NRF_LOG_INFO calls in, for example, nrf_ble_ancs_c.c
       case 'd': itostr(va_arg(argp, int), buf, 10); user_callback(buf,user_data); break;
       case 'x': itostr_extra(va_arg(argp, int), buf, false, 16); user_callback(buf,user_data); break;
       case 'L': {
@@ -807,14 +827,21 @@ void vcbprintf(
         buf[1] = 0;
         if (jsvIsString(v)) {
           JsvStringIterator it;
-          jsvStringIteratorNew(&it, v, 0);
-          // OPT: this could be faster than it is (sending whole blocks at once)
-          while (jsvStringIteratorHasChar(&it)) {
-            buf[0] = jsvStringIteratorGetCharAndNext(&it);
-            char nextCh = jsvStringIteratorGetChar(&it);
-            if (quoted) {
-              user_callback(escapeCharacter(buf[0], nextCh, isJSONStyle), user_data);
-            } else {
+          jsvStringIteratorNewUTF8(&it, v, 0);
+          if (quoted) {
+            int ch = jsvStringIteratorGetUTF8CharAndNext(&it);
+            while (jsvStringIteratorHasChar(&it) || ch>=0) {
+              int nextCh = jsvStringIteratorGetUTF8CharAndNext(&it);
+              if (quoted) {
+                user_callback(escapeCharacter(ch, nextCh, isJSONStyle), user_data);
+              } else {
+                user_callback(buf,user_data);
+              }
+              ch = nextCh;
+            }
+          } else { // OPT: this could be faster than it is (sending whole blocks at once)
+            while (jsvStringIteratorHasChar(&it)) {
+              buf[0] = jsvStringIteratorGetCharAndNext(&it);
               user_callback(buf,user_data);
             }
           }
@@ -925,12 +952,12 @@ size_t jsuGetFreeStack() {
   //Early entries are in higher memory locations.
   //Later entries are in lower memory locations.
 
-  
+
   uint32_t stackPos   = (uint32_t)&ptr;
   uint32_t stackStart = (uint32_t)espruino_stackHighPtr - ESP_STACK_SIZE;
 
   if (stackPos < stackStart) return 0; // should never happen, but just in case of overflow!
-  
+
   return stackPos - stackStart;
 #else
   // stack depth seems pretty platform-specific :( Default to a value that disables it
@@ -988,3 +1015,49 @@ unsigned short int int_sqrt32(unsigned int x) {
   }
   return res;
 }
+
+#ifdef ESPR_UNICODE_SUPPORT
+
+/// Returns true if this character denotes the start of a UTF8 sequence
+bool jsUTF8IsStartChar(char c) {
+  unsigned char ch = (unsigned char)c;
+  return (ch>=0xC2) && (ch<=0xF4);
+}
+
+/// Gets the length of a unicode char sequence by looking at the first char
+unsigned int jsUTF8LengthFromChar(char c) {
+  if ((c&0x80)==0) return 1; // ASCII - definitely just one byte
+  if ((c&0xE0)==0xC0) return 2; // 2-byte code starts with 0b110xxxxx
+  if ((c&0xF0)==0xE0) return 3; // 3-byte code starts with 0b1110xxxx
+  if ((c&0xF8)==0xF0) return 4; // 4-byte code starts with 0b11110xxx
+  return 1;
+}
+
+/// Given a codepoint, figure hot how many bytes it needs for UTF8 encoding
+unsigned int jsUTF8Bytes(int codepoint) {
+  if (codepoint <= 0x7F) return 1;
+  if (codepoint <= 0x7FF) return 2;
+  if (codepoint <= 0xFFFF) return 3;
+  if (codepoint <= 0x10FFFF) return 4;
+  return 0;
+}
+
+// encode a codepoint as a string, NOT null terminated (utf8 min size=4). Returns the length
+unsigned int jsUTF8Encode(int codepoint, char* utf8) {
+  static const uint8_t masks[] = {
+    0x80, // 10000000
+    0xE0, // 11100000
+    0xF0, // 11110000
+    0xF8  // 11111000
+  };
+  unsigned int size = jsUTF8Bytes(codepoint);
+  if (!size) return 0;
+  for (unsigned int i = size - 1; i > 0; --i) {
+      utf8[i] = (char)((codepoint & ~0xC0) | 0x80);
+      codepoint >>= 6;
+  }
+  utf8[0] = (char)((codepoint & ~(masks[size - 1])) | (masks[size - 1] << 1));
+  return size;
+}
+#endif // ESPR_UNICODE_SUPPORT
+

@@ -20,6 +20,7 @@
 #include "jsflash.h"
 #include "jswrapper.h"
 #include "jsinteractive.h"
+#include "jswrap_interactive.h"
 #include "jstimer.h"
 #ifdef PUCKJS
 #include "jswrap_puck.h" // jswrap_puck_getTemperature
@@ -313,7 +314,7 @@ Sum the contents of the given Array, String or ArrayBuffer and return the result
  */
 JsVarFloat jswrap_espruino_sum(JsVar *arr) {
   if (!(jsvIsString(arr) || jsvIsArray(arr) || jsvIsArrayBuffer(arr))) {
-    jsExceptionHere(JSET_ERROR, "Expecting first argument to be an array, not %t", arr);
+    jsExceptionHere(JSET_ERROR, "First argument must be Array, not %t", arr);
     return NAN;
   }
   JsVarFloat sum = 0;
@@ -347,7 +348,7 @@ v+=Math.pow(mean-arr[i],2)`
  */
 JsVarFloat jswrap_espruino_variance(JsVar *arr, JsVarFloat mean) {
   if (!(jsvIsIterable(arr))) {
-    jsExceptionHere(JSET_ERROR, "Expecting first argument to be iterable, not %t", arr);
+    jsExceptionHere(JSET_ERROR, "First argument must iterable, not %t", arr);
     return NAN;
   }
   JsVarFloat variance = 0;
@@ -776,12 +777,44 @@ their values.
   "ifndef" : "SAVE_ON_FLASH",
   "generate" : "jswrap_pipe",
   "params" : [
-    ["source","JsVar","The source file/stream that will send content."],
+    ["source","JsVar","The source file/stream that will send content. As of 2v19 this can also be a `String`"],
     ["destination","JsVar","The destination file/stream that will receive content from the source."],
     ["options","JsVar",["[optional] An object `{ chunkSize : int=64, end : bool=true, complete : function }`","chunkSize : The amount of data to pipe from source to destination at a time","complete : a function to call when the pipe activity is complete","end : call the 'end' function on the destination when the source is finished"]]
   ],
   "typescript" : "pipe(source: any, destination: any, options?: PipeOptions): void"
-}*/
+}
+Pipe one stream to another.
+
+This can be given any object with a `read` method as a source, and any object with a `.write(data)` method as a destination.
+
+Data will be piped from `source` to `destination` in the idle loop until `source.read(...)` returns `undefined`.
+
+For instance:
+
+```
+// Print a really big string to the console, 1 character at a time and write 'Finished!' at the end
+E.pipe("This is a really big String",
+       {write: print},
+       {chunkSize:1, complete:()=>print("Finished!")});
+
+// Pipe the numbers 1 to 100 to a StorageFile in Storage
+E.pipe({ n:0, read : function() { if (this.n<100) return (this.n++)+"\n"; }},
+       require("Storage").open("testfile","w"));
+
+// Pipe a StorageFile straight to the Bluetooth UART
+E.pipe(require("Storage").open("testfile","r"), Bluetooth);
+
+// Pipe a normal file in Storage (not StorageFile) straight to the Bluetooth UART
+E.pipe(require("Storage").read("blob.txt"), Bluetooth);
+
+// Pipe a normal file in Storage as a response to an HTTP request
+function onPageRequest(req, res) {
+  res.writeHead(200, {'Content-Type': 'text/plain'});
+  E.pipe(require("Storage").read("webpage.txt"), res);
+}
+require("http").createServer(onPageRequest).listen(80);
+```
+*/
 
 /*JSON{
   "type" : "staticmethod",
@@ -918,6 +951,105 @@ more information.
 JsVar *jswrap_espruino_toFlatString(JsVar *args) {
   return jswrap_espruino_toStringX(args, true);
 }
+
+/*JSON{
+  "type" : "staticmethod",
+  "ifndef" : "SAVE_ON_FLASH",
+  "class" : "E",
+  "name" : "asUTF8",
+  "generate" : "jswrap_espruino_asUTF8",
+  "params" : [
+    ["str","JsVar","The string to turn into a UTF8 Unicode String"]
+  ],
+  "return" : ["JsVar","A String"],
+  "return_object" : "String"
+}
+By default, strings in Espruino are standard 8 bit binary strings
+unless they contain Unicode chars or a `\u####` escape code
+that doesn't map to the range 0..255.
+
+However calling E.asUTF8 will convert one of those strings to
+UTF8.
+
+```
+var s = String.fromCharCode(0xF0,0x9F,0x8D,0x94);
+var u = E.asUTF8(s);
+s.length // 4
+s[0] // "\xF0"
+u.length // 1
+u[0] // hamburger emoji
+```
+
+**NOTE:** UTF8 is currently only available on Bangle.js devices
+*/
+JsVar *jswrap_espruino_asUTF8(JsVar *str) {
+#ifdef ESPR_UNICODE_SUPPORT
+  return jsvNewUTF8StringAndUnLock(jsvAsString(str));
+#else
+  jsExceptionHere(JSET_ERROR, "Unicode not supported on this build");
+  return 0;
+#endif
+}
+
+/*JSON{
+  "type" : "staticmethod",
+  "ifndef" : "SAVE_ON_FLASH",
+  "class" : "E",
+  "name" : "fromUTF8",
+  "generate" : "jswrap_espruino_fromUTF8",
+  "params" : [
+    ["str","JsVar","The string to check"]
+  ],
+  "return" : ["JsVar","A String"],
+  "return_object" : "String"
+}
+Given a UTF8 String (see `E.asUTF8`) this returns the underlying representation
+of that String.
+
+```
+E.fromUTF8("\u03C0") == "\xCF\x80"
+```
+
+**NOTE:** UTF8 is currently only available on Bangle.js devices
+*/
+JsVar *jswrap_espruino_fromUTF8(JsVar *str) {
+#ifdef ESPR_UNICODE_SUPPORT
+  if (!str) return 0;
+  return jsvGetUTF8BackingString(str);
+#else
+  return false;
+#endif
+}
+
+/*JSON{
+  "type" : "staticmethod",
+  "ifndef" : "SAVE_ON_FLASH",
+  "class" : "E",
+  "name" : "isUTF8",
+  "generate" : "jswrap_espruino_isUTF8",
+  "params" : [
+    ["str","JsVar","The string to check"]
+  ],
+  "return" : ["bool","True if the given String is treated as UTF8 by Espruino"]
+}
+By default, strings in Espruino are standard 8 bit binary strings
+unless they contain Unicode chars or a `\u####` escape code
+that doesn't map to the range 0..255.
+
+This checks if a String is being treated by Espruino as a UTF8 String
+
+See `E.asUTF8` to convert to a UTF8 String
+
+**NOTE:** UTF8 is currently only available on Bangle.js devices
+*/
+bool jswrap_espruino_isUTF8(JsVar *str) {
+#ifdef ESPR_UNICODE_SUPPORT
+  return jsvIsUTF8String(str);
+#else
+  return false;
+#endif
+}
+
 
 /*TYPESCRIPT
 type Uint8ArrayResolvable =
@@ -2064,12 +2196,17 @@ reset pin had been toggled.
 Espruino (resetting the interpreter and pin states, but not all the hardware)
 */
 void jswrap_espruino_reboot() {
+#ifndef EMULATED
   // ensure `E.on('kill',...` gets called and everything is torn down correctly
   jsiKill();
   jsvKill();
   jshKill();
 
   jshReboot();
+#else // EMULATED
+  // if emulated, just call reset() to avoid a crash
+  jswrap_interface_reset(false);
+#endif
 }
 
 
@@ -2287,8 +2424,8 @@ E.decodeUTF8("UTF-8 Euro: \u00e2\u0082\u00ac", unicodeRemap, '[?]') == "UTF-8 Eu
 
  */
 JsVar *jswrap_espruino_decodeUTF8(JsVar *str, JsVar *lookup, JsVar *replaceFn) {
-  if (!(jsvIsString(str))) {
-    jsExceptionHere(JSET_ERROR, "Expecting first argument to be a string, not %t", str);
+  if (!jsvIsString(str)) {
+    jsExceptionHere(JSET_ERROR, "First argument must be String");
     return 0;
   }
   JsvStringIterator it, dit;

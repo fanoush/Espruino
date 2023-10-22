@@ -1,5 +1,75 @@
-     2v19 : 
+     2v20 : Ensure String.charCodeAt returns NaN for out of bounds chars
+            Bangle.js2: When rendering overlays, *do not* use the current FG/BG color for 1 bit overlays
+            nRF52 SDK15: Fix UART when >1 central link enabled
+            Bangle.js2: Allow 2 central links at once
+            Fix `if (0);"test"||fail()` 2v19 regression - strings after if(0) didn't get interpreted 
+            Ensure eval("1;;;")==1 - eval("1;")==1 before, but not eval("1;;")            
+            Ensure AssignmentExpr returns the value of LHS, not the LHS. `(a=2)=3` now fails (as per spec)
+            Ensure default args for arrow functions fail with error `(a,b=3)=>a+b` now fails (until default args get added)
+            nRF52: bootloader asks for connection interval 7.5->30ms now, not just 15ms. Should improve DFU on iOS 16 which doesn't honour 15ms request
+            Fix unicode in object keys when UTF8 support enabled, eg.  {'\u00e4':1}
+            Bangle.js: Change order of items in the Recovery Menu (hold BTN at boot) to put more common options first
+            Tidying up error messages (no trailing '.' or '\n'), making almost-similar error messages the same 
+            Fix issue using `String.concat` with flash strings (fix #2268)
+            jsvFindChildFromString enhancement - adds 10% performance on minified code
+            Remove createChild argument from jsvFindChildFromString, add jsvFindOrAddChildFromString instead
+            Add ES9 optional catch binding (`try {} catch {}`) 
+            Bangle.js: Fix terminal's repeated call to '.flip' that broke double buffering on Bangle.js 1
+            JIT: Ensure ternary block skips 'named' variables (and references them correctly)
 
+     2v19 : Fix Object.values/entries for numeric keys after 2v18 regression (fix #2375)
+            nRF52: for SD>5 use static buffers for advertising and scan response data (#2367)
+            Bangle.js: Add Bangle.showRecoveryMenu, and if storage is corrupt then show it rather than automatically doing factory reset
+            Fix Graphics.createImage if the last character is a newline
+            Graphics: Fix issue if drawImage given a non-image
+            Added optional Unicode support (Linux/Bangle.js only currently)
+            Added optional PBF font loading support (Linux/Bangle.js only currently)
+            Fix recent regression in switch handling caused by Strings only being interpreted when executing
+            Ensure [].length is a constant (we don't support assignment)
+            Bangle.js: showMenu now won't redraw menu items if the onchange handler changed the menu
+            Graphics: Add Espruino-specific extension to PBF font loader to handle 2bpp
+            Graphics: Improve blendColor when outputting to 2/4/8bpp Graphics
+            Graphics: Allow setFont(...) to work with >1bpp and PBF fonts
+            Add Object.addListener(same as '.on') and prependListener to allow a handler to be added first
+            Fix regression with g.wrapString and long UTF8 strings (fix #2385)
+            Bangle.js2: Fix reusing touch coordinates under high load (fix #2374)
+            Bangle.js: setUI now has a 'redraw' argument to allow apps to provide a way to redraw themselves
+            Now executes ".bootPowerOn" from Storage on first boot after power restored
+            Bangle.js: Add Bangle.setBacklight(), Bangle.backlight event, Bangle.isBacklightOn() and allow input when lcd off if lockTimeout is 0 (fix #2383)
+            Added NRF.eraseBonds() to allow peer manager info to be removed (other than by holding all buttons down)
+            nRF52840: Fix potential 'SPI Send Error 17' SPI lockup
+            Bangle.js2: Fix number selector first draw in menu after 'redraw' argument added
+            Bangle.js2: number selector now supports tapping at top/bottom to increment/decrement value
+            Storage: StorageFiles don't store addr/len any more, they look up the file for each write (safer, and fast now we have a filename cache)
+            Graphics: g.dump() will now work without allocating huge buffers
+            nRF52: Added CTS (Current Time Service) support to ANCS/AMS code
+            nRF52: Add NRF.on('error') event to provide an easy way to check for Softdevice errors
+            If a jshardware op is interrupted, report "Interrupted in X" and not "Timeout on X"
+            Ensure Ctrl-C/holding button cannot break out of compaction
+            Bangle.js: don't compact storage if less than 10% battery
+            Support for Overlays when SPILCD driver used
+            Bangle.js2: Show a message on screen when compacting storage (fix #2391)
+            Storage: Compaction now starts from the last uncompacted page - faster if only partly compacted (#2391)
+            Graphics: drawImage now avoids getting pixels top/bottom of an image that might be cropped/offscreen
+            Bangle.js: Handle pushing events via the event queue (allows events to be queued rather than lost)
+            Bangle.js2: Allow HRM environment sensor data to be pushed, also add flags for disabling auto exposure and wear detect
+            Fix failure to run JIT caused by String interpreting optimisation
+            JIT: JIT failures now don't stop execution of subsequent commands - function is just executed as normal JS
+            JIT: Fix scoping of JITed functions (they can now access vars in the scope they were defined in)
+            Improve execution speed by not parsing strings when skipping blocks
+            Graphics: drawImage(...,{filter:1}) added to allow smooth downscaling of images
+            Graphics: fix for images in drawString when completely offscreen (regression after drawImage optimisation)
+            Storage: Output progress on FactoryReset and Compact
+            nRF5x: Ensure we don't start advertising immediately after softdevice restart if NRF.sleep() was used
+            Bangle.js2: Ensure `HRM-raw.raw` is set correctly after we moved to binary hrm algorithm
+            nRF5x: Add `NRF.on("passkey", ...)` to allow passkey pairing with `NRF.setSecurity({mitm:1, display:1});`
+            nrf52: Allow disabling pairing with `NRF.setSecurity({pair:0})`
+            Allow E.pipe to pipe from Strings, remove pipe's internal `position` counter (fix #2352)
+            Bangle.js 1: remove OneWire,I2C,SPI as it uses too much flash space to exist alongside UTF8+Tensorflow+JIT on nRF52
+            ARM: Apply -fmerge-all-constants to the build (saves ~1kb)
+            Bangle.js: If screen is rotated, also rotate accelerometer and magnetometer values
+            Microbit1: don't include text versions of Bluetooth error messages (just the error number) to save some memory
+            
      2v18 : Fix drawString with setClipRect with 90/270-degree rotation (fix #2343)
             Pico/Wifi: Enabled JIT compiler
             Ensure that if JIT fails, we correctly remove just the "jit" tag and treat the function as normal JS

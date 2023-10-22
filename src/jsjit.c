@@ -106,7 +106,7 @@ NO_INLINE JsVar *_jsxMathsOpSkipNamesAndUnLock(JsVar *a, JsVar *b, int op) {
 // Add a variable to the current scope (eg VAR statement), and return it
 NO_INLINE JsVar *_jsxAddVar(const char *name) {
   JsVar *scope = jspeiGetTopScope();
-  JsVar *a = jsvFindChildFromString(scope, name, true);
+  JsVar *a = jsvFindOrAddChildFromString(scope, name);
   jsvUnLock(scope);
   return a;
 }
@@ -718,7 +718,7 @@ void __jsjBinaryExpression(unsigned int lastPrecedence) {
             }
             a = jsvNewFromBool(found);
           } else { // not built-in, just assume we can't do it
-            jsExceptionHere(JSET_ERROR, "Cannot use 'in' operator to search a %t", bv);
+            jsExceptionHere(JSET_ERROR, "Can't use 'in' operator to search a %t", bv);
             jsvUnLock(a);
             a = 0;
           }
@@ -745,21 +745,25 @@ void jsjConditionalExpression() {
   jsjBinaryExpression();
   if (lex->tk=='?') {
     JSP_ASSERT_MATCH('?');
+    if (jit.phase == JSJP_EMIT) {
+      /* we handle the condition here because it means the stack level is
+      then the same when we capture the true/false blocks as when we emit them */
+      DEBUG_JIT("; ternary condition\n");
+      jsjPopAsBool(0);
+      jsjcCompareImm(0, 0);
+    }
     DEBUG_JIT_EMIT("; capture ternary true block\n");
     JsVar *oldBlock = jsjcStartBlock();
     jsjAssignmentExpression();
-    if (jit.phase == JSJP_EMIT) jsjPopAsVar(0); // we pop to r0 here so we can push after and avoid confusing the stack size checker
+    if (jit.phase == JSJP_EMIT) jsjPopNoName(0); // we pop to r0 here so we can push after and avoid confusing the stack size checker
     JsVar *trueBlock = jsjcStopBlock(oldBlock);
     JSP_MATCH(':');
     DEBUG_JIT_EMIT("; capture ternary false block\n");
     oldBlock = jsjcStartBlock();
     jsjAssignmentExpression();
-    if (jit.phase == JSJP_EMIT) jsjPopAsVar(0); // we pop to r0 here so we can push after and avoid confusing the stack size checker
+    if (jit.phase == JSJP_EMIT) jsjPopNoName(0); // we pop to r0 here so we can push after and avoid confusing the stack size checker
     JsVar *falseBlock = jsjcStopBlock(oldBlock);
     if (jit.phase == JSJP_EMIT) {
-      DEBUG_JIT("; ternary condition\n");
-      jsjPopAsBool(0);
-      jsjcCompareImm(0, 0);
       DEBUG_JIT("; ternary jump after condition\n");
       // if false, jump after true block (if an 'else' we need to jump over the jsjcBranchRelative
       jsjcBranchConditionalRelative(JSJAC_EQ, jsvGetStringLength(trueBlock) + 2);
@@ -1008,7 +1012,7 @@ void jsjStatementDoOrWhile(bool isWhile) {
       jsjPopAsBool(0);
       jsjcCompareImm(0, 0);
       jsjcBranchConditionalRelative(JSJAC_NE, codePosStart - (jsjcGetByteCount()+2));
-    }    
+    }
   }
 }
 
@@ -1094,6 +1098,7 @@ void jsjBlockOrStatement() {
 }
 
 JsVar *jsjParseFunction() {
+  JsExecFlags oldExec = execInfo.execute;
   jsjcStart();
   // FIXME: I guess we need to create a function execution scope and unpack parameters?
   // Maybe we could use jspeFunctionCall to do all this for us (not creating a native function but a 'normal' one
@@ -1118,6 +1123,7 @@ JsVar *jsjParseFunction() {
   }
   JsVar *v = jsjcStop();
   JsVar *exception = jspGetException();
+  execInfo.execute = oldExec; // restore exec state
   if (!exception) return v;
   // We had an error - don't return half-complete code
   jsiConsolePrintf("JIT %v\n", exception);

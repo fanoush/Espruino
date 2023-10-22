@@ -22,7 +22,7 @@ void jsserialHardwareFunc(int data, serial_sender_data *info) {
   jshTransmit(device, (unsigned char)data);
 }
 
-#ifndef SAVE_ON_FLASH
+#ifndef ESPR_NO_SOFTWARE_SERIAL
 /**
  * Send a single byte through Serial.
  */
@@ -87,7 +87,7 @@ void jsserialSoftwareFunc(
   // we do this even if we are high, because we want to ensure that the next char is properly spaced
   // Ideally we'd be able to store the last bit time when sending so we could just go straight on from it
 }
-#endif
+#endif // ESPR_NO_SOFTWARE_SERIAL
 
 bool jsserialPopulateUSARTInfo(
     JshUSARTInfo *inf,
@@ -118,7 +118,7 @@ bool jsserialPopulateUSARTInfo(
   if (!jsvIsUndefined(baud)) {
     int b = (int)jsvGetInteger(baud);
     if (b<=100 || b > 10000000)
-      jsExceptionHere(JSET_ERROR, "Invalid baud rate specified");
+      jsExceptionHere(JSET_ERROR, "Invalid baud rate %d", b);
     else
       inf->baudRate = b;
   }
@@ -174,7 +174,7 @@ bool jsserialGetSendFunction(JsVar *serialDevice, serial_sender *serialSend, ser
     *(IOEventFlags*)serialSendData = device;
     return true;
   } else if (device == EV_NONE) {
-#ifndef SAVE_ON_FLASH
+#ifndef ESPR_NO_SOFTWARE_SERIAL
     // Software Serial
     JsVar *baud = jsvObjectGetChildIfExists(serialDevice, USART_BAUDRATE_NAME);
     JsVar *options = jsvObjectGetChildIfExists(serialDevice, DEVICE_OPTIONS_NAME);
@@ -190,7 +190,7 @@ bool jsserialGetSendFunction(JsVar *serialDevice, serial_sender *serialSend, ser
   return false;
 }
 
-#ifndef SAVE_ON_FLASH
+#ifndef ESPR_NO_SOFTWARE_SERIAL
 typedef struct {
   char buf[64]; ///< received data
   unsigned char bufLen; ///< amount of received characters
@@ -230,7 +230,7 @@ bool jsserialEventCallbackInit(JsVar *parent, JshUSARTInfo *inf) {
     jsvUnLock(list);
     jshSetEventCallback(exti, jsserialEventCallback);
   } else {
-    jsExceptionHere(JSET_ERROR, "Unable to watch pin %p, no Software Serial RX\n", inf->pinRX);
+    jsExceptionHere(JSET_ERROR, "Unable to watch pin %p, no Software Serial RX", inf->pinRX);
     return false;
   }
 
@@ -340,4 +340,4 @@ void jsserialEventCallback(bool state, IOEventFlags channel) {
   jsserialCheckForCharacter(data);
 
 }
-#endif
+#endif // ESPR_NO_SOFTWARE_SERIAL

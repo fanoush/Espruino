@@ -130,7 +130,7 @@ void _jswrap_promise_resolve_or_reject_chain(JsVar *promise, JsVar *data, bool r
     _jswrap_promise_resolve_or_reject(promise, data, fn);
     jsvUnLock(fn);
   } else if (!resolve) {
-    JsVar *previouslyResolved = jsvFindChildFromString(promise, JS_PROMISE_RESOLVED_NAME, false);
+    JsVar *previouslyResolved = jsvFindChildFromString(promise, JS_PROMISE_RESOLVED_NAME);
     if (!previouslyResolved) {
       jsExceptionHere(JSET_ERROR, "Unhandled promise rejection: %v", data);
       // If there was an exception with a stack trace, pass it through so we can keep adding stack to it
@@ -165,12 +165,12 @@ void _jswrap_promise_queuereject(JsVar *promise, JsVar *data) {
   jsvUnLock(fn);
 }
 
-void jswrap_promise_all_resolve(JsVar *promise, JsVarInt index, JsVar *data) {
+void jswrap_promise_all_resolve(JsVar *promise, JsVar *index, JsVar *data) {
   JsVarInt remaining = jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(promise, JS_PROMISE_REMAINING_NAME));
   JsVar *arr = jsvObjectGetChildIfExists(promise, JS_PROMISE_RESULT_NAME);
   if (arr) {
     // set the result
-    jsvSetArrayItem(arr, index, data);
+    jsvSetArrayItem(arr, jsvGetInteger(index), data);
     // Update remaining list
     remaining--;
     jsvObjectSetChildAndUnLock(promise, JS_PROMISE_REMAINING_NAME, jsvNewFromInteger(remaining));
@@ -279,7 +279,8 @@ JsVar *jswrap_promise_all(JsVar *arr) {
   while (jsvObjectIteratorHasValue(&it)) {
     JsVar *p = jsvObjectIteratorGetValue(&it);
     if (_jswrap_promise_is_promise(p)) {
-      JsVar *resolve = jsvNewNativeFunction((void (*)(void))jswrap_promise_all_resolve, JSWAT_VOID|JSWAT_THIS_ARG|(JSWAT_INT32<<JSWAT_BITS)|(JSWAT_JSVAR<<(JSWAT_BITS*2)));
+      JsVar *resolve = jsvNewNativeFunction((void (*)(void))jswrap_promise_all_resolve, JSWAT_VOID|JSWAT_THIS_ARG|(JSWAT_JSVAR<<JSWAT_BITS)|(JSWAT_JSVAR<<(JSWAT_BITS*2)));
+      // NOTE: we use (this,JsVar,JsVar) rather than an int to avoid #2377 on emscripten, since that argspec is already used for forEach/otehrs
       // bind the index variable
       JsVar *indexVar = jsvNewFromInteger(promiseIndex);
       jsvAddFunctionParameter(resolve, 0, indexVar);
@@ -366,7 +367,7 @@ JsVar *jswrap_promise_reject(JsVar *data) {
 
 void _jswrap_promise_add(JsVar *parent, JsVar *callback, bool resolve) {
   if (!jsvIsFunction(callback)) {
-    jsExceptionHere(JSET_TYPEERROR, "Callback must be a function, got %t", callback);
+    jsExceptionHere(JSET_TYPEERROR, "Callback is not a function");
     return;
   }
 
@@ -377,7 +378,7 @@ void _jswrap_promise_add(JsVar *parent, JsVar *callback, bool resolve) {
     // Check to see if promise has already been resolved
     /* Note: we use jsvFindChildFromString not ObjectGetChild so we get the name.
      * If we didn't then we wouldn't know if it was resolved, but with undefined */
-    JsVar *resolved = jsvFindChildFromString(parent, JS_PROMISE_RESOLVED_NAME, 0);
+    JsVar *resolved = jsvFindChildFromString(parent, JS_PROMISE_RESOLVED_NAME);
     if (resolved) {
       resolveImmediately = true;
       resolveImmediatelyValue = jsvSkipNameAndUnLock(resolved);

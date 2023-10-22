@@ -34,6 +34,7 @@ info = {
      'JIT'
    ],
    'makefile' : [
+     'BLACKLIST=boards/BANGLEJS.blocklist', # force some stuff to be removed to save space   
      'DEFINES += -DESPR_HWVERSION=1',
      'DEFINES += -DBANGLEJS_F18',
      'DEFINES += -DCONFIG_NFCT_PINS_AS_GPIOS', # Allow the reset pin to work
@@ -45,11 +46,13 @@ info = {
      'DEFINES+=-DBLUETOOTH_ADVERTISING_INTERVAL=200', # since we don't care as much about ~20uA battery usage, raise this to make getting a connection faster
      'ESPR_BLUETOOTH_ANCS=1', # Enable ANCS (Apple notifications) support
      'DEFINES+=-DCUSTOM_GETBATTERY=jswrap_banglejs_getBattery',
+     'DEFINES+=-DESPR_UNICODE_SUPPORT=1',
+     'DEFINES+=-DESPR_NO_SOFTWARE_SERIAL=1',
      'DEFINES+=-DDUMP_IGNORE_VARIABLES=\'"g\\0"\'',
      'DEFINES+=-DESPR_GRAPHICS_INTERNAL=1',
-     'DEFINES+=-DUSE_FONT_6X8 -DGRAPHICS_PALETTED_IMAGES -DGRAPHICS_ANTIALIAS',
+     'DEFINES+=-DUSE_FONT_6X8 -DGRAPHICS_PALETTED_IMAGES -DGRAPHICS_ANTIALIAS -DESPR_PBF_FONTS',
      'DEFINES+=-DNO_DUMP_HARDWARE_INITIALISATION', # don't dump hardware init - not used and saves 1k of flash
-     'DEFINES += -DESPR_NO_LINE_NUMBERS=1', # we execute mainly from flash, so line numbers can be worked out
+     'DEFINES+=-DESPR_NO_LINE_NUMBERS=1', # we execute mainly from flash, so line numbers can be worked out
      'DEFINES+=-DAPP_TIMER_OP_QUEUE_SIZE=6', # Bangle.js accelerometer poll handler needs something else in queue size
      'DFU_PRIVATE_KEY=targets/nrf5x_dfu/dfu_private_key.pem',
      'DFU_SETTINGS=--application-version 0xff --hw-version 52 --sd-req 0x8C,0x91',
@@ -76,8 +79,8 @@ chip = {
   'flash' : 512,
   'speed' : 64,
   'usart' : 1,
-  'spi' : 1,
-  'i2c' : 1,
+  'spi' : 0, # hardware supports 1, but we don't use these
+  'i2c' : 0, # hardware supports 1, but we don't use these
   'adc' : 1,
   'dac' : 0,
   'saved_code' : {

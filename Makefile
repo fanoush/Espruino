@@ -411,6 +411,7 @@ SOURCES += \
 libs/graphics/bitmap_font_4x6.c \
 libs/graphics/bitmap_font_6x8.c \
 libs/graphics/vector_font.c \
+libs/graphics/pbf_font.c \
 libs/graphics/graphics.c \
 libs/graphics/lcd_arraybuffer.c \
 libs/graphics/lcd_js.c
@@ -772,7 +773,7 @@ endif
 # =============================================================================
 
 boardjson: scripts/build_board_json.py $(WRAPPERSOURCES)
-	@echo Generating Board JSON
+	@echo ================================== Generating Board JSON
 	$(Q)echo WRAPPERSOURCES = $(WRAPPERSOURCES)
 	$(Q)echo DEFINES =  $(DEFINES)
 ifdef USE_NET
@@ -783,32 +784,32 @@ else
 endif
 
 docs:
-	@echo Generating Board docs
+	@echo ================================== Generating Board docs
 	$(Q)python2.7 scripts/build_docs.py $(WRAPPERSOURCES) $(DEFINES) -B$(BOARD)
 	@echo functions.html created
 
 $(WRAPPERFILE): scripts/build_jswrapper.py $(WRAPPERSOURCES)
-	@echo Generating JS wrappers
+	@echo ================================== Generating JS wrappers
 	$(Q)echo WRAPPERSOURCES = $(WRAPPERSOURCES)
 	$(Q)echo DEFINES =  $(DEFINES)
 	$(Q)$(PYTHON) scripts/build_jswrapper.py $(WRAPPERSOURCES) $(JSMODULESOURCES) $(DEFINES) -B$(BOARD) -F$(WRAPPERFILE)
 
 ifdef PININFOFILE
 $(PININFOFILE).c $(PININFOFILE).h: scripts/build_pininfo.py
-	@echo Generating pin info
+	@echo ================================== Generating pin info
 	$(Q)$(PYTHON) scripts/build_pininfo.py $(BOARD) $(PININFOFILE).c $(PININFOFILE).h
 endif
 
 ifndef NRF5X # nRF5x devices use their own linker files that aren't automatically generated.
 ifndef EFM32
 $(LINKER_FILE): scripts/build_linker.py
-	@echo Generating linker scripts
+	@echo ================================== Generating linker scripts
 	$(Q)$(PYTHON) scripts/build_linker.py $(BOARD) $(LINKER_FILE) $(BUILD_LINKER_FLAGS)
 endif # EFM32
 endif # NRF5X
 
 $(PLATFORM_CONFIG_FILE): boards/$(BOARD).py scripts/build_platform_config.py
-	@echo Generating platform configs
+	@echo ================================== Generating platform configs
 	$(Q)$(PYTHON) scripts/build_platform_config.py $(BOARD) $(HEADERFILENAME)
 
 # If realpath exists, use relative paths
@@ -885,6 +886,7 @@ clean:
 	$(Q)rm -f $(BINDIR)/espruino_embedded.h
 	$(Q)rm -f $(BINDIR)/espruino_embedded.c
 	$(Q)rm -f $(BINDIR)/jstypes.h
+	$(Q)rm -f $(ROOT)/targetlibs/nrf5x_*/components/toolchain/gcc/gcc_startup_nrf5*.o $(ROOT)/targetlibs/stm32f4/lib/startup_stm32f4*.o $(ROOT)/targetlibs/stm32f1/lib/startup_stm32f10x_*.o
 
 wrappersources:
 	$(info WRAPPERSOURCES=$(WRAPPERSOURCES))

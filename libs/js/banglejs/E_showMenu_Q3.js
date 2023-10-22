@@ -7,7 +7,7 @@
   var menuIcon = "\0\f\f\x81\0\xFF\xFF\xFF\0\0\0\0\x0F\xFF\xFF\xF0\0\0\0\0\xFF\xFF\xFF";
   var options = menu[""]||{};
   if (!options.title) options.title="Menu";
-  var back = options.back||menu["< Back"];  
+  var back = options.back||menu["< Back"];
   var keys = Object.keys(menu).filter(k=>k!=="" && k!="< Back");
   keys.forEach(k => {
     var item = menu[k];
@@ -18,7 +18,7 @@
   });
   // Submenu for editing menu options...
   function showSubMenu(item, title) {
-    /*if ("number"!=typeof item.value) 
+    /*if ("number"!=typeof item.value)
       return console.log("Unhandled item type");*/
     var step = item.step||1;
     if (!item.noList && item.min!==undefined && item.max!==undefined &&
@@ -51,22 +51,17 @@
       // show simple box for scroll up/down
       var R = Bangle.appRect;
       var v = item.value;
-      g.reset().clearRect(Bangle.appRect);
+      g.reset().clearRect(R);
       g.setFont("12x20").setFontAlign(0,0).drawString(
           menuIcon+" "+title, R.x+R.w/2,R.y+12);
-      
+
       function draw() {
         var mx = R.x+R.w/2, my = 12+R.y+R.h/2, txt = item.format?item.format(v,2):v, s = 30;
         g.reset().setColor(g.theme.bg2).fillRect({x:R.x+24, y:R.y+36, w:R.w-48, h:R.h-48, r:5});
         g.setColor(g.theme.fg2).setFontVector(Math.min(30,(R.w-52)*100/g.setFontVector(100).stringWidth(txt))).setFontAlign(0,0).drawString(txt, mx, my);
         g.fillPoly([mx,my-45, mx+15,my-30, mx-15,my-30]).fillPoly([mx,my+45, mx+15,my+30, mx-15,my+30]);
       }
-      draw();
-      Bangle.setUI({
-          mode: "updown",
-          back: show,
-          remove: options.remove
-        }, dir => {
+      function cb(dir) {
         if (dir) {
           v -= (dir||1)*(item.step||1);
           if (item.min!==undefined && v<item.min) v = item.wrap ? item.max : item.min;
@@ -77,6 +72,29 @@
           if (item.onchange) item.onchange(item.value);
           scr.scroll = l.scroller.scroll; // set scroll to prev position
           show(); // redraw original menu
+        }
+      }
+      draw();
+      var dy = 0;
+      Bangle.setUI({
+        mode: "custom",
+        back: show,
+        remove: options.remove,
+        redraw : draw,
+        drag : e => {
+          dy += e.dy; // after a certain amount of dragging up/down fire cb
+          if (!e.b) dy=0;
+          while (Math.abs(dy)>32) {
+            if (dy>0) { dy-=32; cb(1); }
+            else { dy+=32; cb(-1); }
+            Bangle.buzz(20);
+          }
+        },
+        touch : (_,e) => {
+          Bangle.buzz(20);
+          if (e.y<82) cb(-1); // top third
+          else if (e.y>142) cb(1); // bottom third
+          else cb(); // middle = accept
         }
       });
     }
@@ -128,7 +146,7 @@
           if ("boolean"==typeof item.value)
             item.value=!item.value;
           if (item.onchange) item.onchange(item.value);
-          l.scroller.drawItem(idx);
+          if (l.scroller.isActive()) l.scroller.drawItem(idx);
         }
       }
     }

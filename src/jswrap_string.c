@@ -39,7 +39,11 @@ them.
   "params" : [
     ["str","JsVarArray","A value to turn into a string. If undefined or not supplied, an empty String is created."]
   ],
-  "return" : ["JsVar","A String"]
+  "return" : ["JsVar","A String"],
+  "typescript" : [
+    "new(...str: any[]): any;",
+    "(arg?: any): string;"
+  ]
 }
 Create a new String
  */
@@ -89,6 +93,15 @@ JsVar *jswrap_string_fromCharCode(JsVar *arr) {
   return r;
 }
 
+int _jswrap_string_charCodeAt(JsVar *parent, JsVarInt idx) {
+  if (!jsvIsString(parent)) return -1;
+  JsvStringIterator it;
+  jsvStringIteratorNewUTF8(&it, parent, (size_t)idx);
+  int uChar = jsvStringIteratorGetUTF8CharAndNext(&it);
+  jsvStringIteratorFree(&it);
+  return uChar;
+}
+
 /*JSON{
   "type" : "method",
   "class" : "String",
@@ -101,19 +114,26 @@ JsVar *jswrap_string_fromCharCode(JsVar *arr) {
 }
 Return a single character at the given position in the String.
  */
-JsVar *jswrap_string_charAt(JsVar *parent, JsVarInt idx) {
-  // We do this so we can handle '/0' in a string
-  JsVar *r = jsvNewFromEmptyString();
-  if (r && jsvIsString(parent) && idx>=0) {
-    JsvStringIterator it;
-    jsvStringIteratorNew(&it, parent, (size_t)idx);
-    if (jsvStringIteratorHasChar(&it)) {
-      char ch = jsvStringIteratorGetChar(&it);
-      jsvAppendStringBuf(r, &ch, 1);
-    }
-    jsvStringIteratorFree(&it);
+// charAt but returns undefined for out of range
+JsVar *jswrap_string_charAt_undefined(JsVar *parent, JsVarInt idx) {
+  int uChar = _jswrap_string_charCodeAt(parent, idx);
+  if (uChar<0) return 0;
+#ifdef ESPR_UNICODE_SUPPORT
+  if (jsUTF8Bytes(uChar)>1) {
+    char uBuf[4];
+    unsigned int l = jsUTF8Encode(uChar, uBuf);
+    return jsvNewUTF8StringAndUnLock(jsvNewStringOfLength(l, uBuf));
+  } else
+#endif
+  {
+    char ch = (char)uChar;
+    return jsvNewStringOfLength(1, &ch);
   }
-  return r;
+}
+JsVar *jswrap_string_charAt(JsVar *parent, JsVarInt idx) {
+  JsVar *v = jswrap_string_charAt_undefined(parent, idx);
+  if (v) return v;
+  return jsvNewFromEmptyString();
 }
 
 /*JSON{
@@ -124,15 +144,15 @@ JsVar *jswrap_string_charAt(JsVar *parent, JsVarInt idx) {
   "params" : [
     ["pos","int","The character number in the string. Negative values return characters from end of string (-1 = last char)"]
   ],
-  "return" : ["int32","The integer value of a character in the string"]
+  "return" : ["JsVar","The integer value of a character in the string, or `NaN` if out of bounds"]
 }
 Return the integer value of a single character at the given position in the
 String.
-
-Note that this returns 0 not 'NaN' for out of bounds characters
- */
-int jswrap_string_charCodeAt(JsVar *parent, JsVarInt idx) {
-  return (unsigned char)jsvGetCharInString(parent, (size_t)idx);
+*/
+JsVar *jswrap_string_charCodeAt(JsVar *parent, JsVarInt idx) {
+  int uChar = _jswrap_string_charCodeAt(parent, idx);
+  if (uChar<0) return jsvNewFromFloat(NAN);
+  return jsvNewFromInteger(uChar);
 }
 
 
@@ -541,7 +561,7 @@ JsVar *jswrap_string_split(JsVar *parent, JsVar *split) {
         if (splitlen==0) break;
       }
 
-      JsVar *part = jsvNewFromStringVar(parent, (size_t)last, (size_t)(idx-last));
+      JsVar *part = jsvNewFromStringVar(parent, (size_t)jsvConvertFromUTF8Index(parent, last), (size_t)(jsvConvertFromUTF8Index(parent, idx)-jsvConvertFromUTF8Index(parent, last)));
       if (!part) break; // out of memory
       jsvArrayPush(array, part);
       jsvUnLock(part);
@@ -585,6 +605,89 @@ JsVar *jswrap_string_toUpperLowerCase(JsVar *parent, bool upper) {
     char ch = jsvStringIteratorGetCharAndNext(&itsrc);
     ch = upper ? charToUpperCase(ch) : charToLowerCase(ch);
     jsvStringIteratorAppend(&itdst, ch);
+  }
+
+  jsvStringIteratorFree(&itsrc);
+  jsvStringIteratorFree(&itdst);
+  jsvUnLock(parentStr);
+
+  return res;
+}
+
+/*JSON{
+  "type" : "method",
+  "class" : "String",
+  "name" : "removeAccents",
+  "ifndef" : "SAVE_ON_FLASH",
+  "generate_full" : "jswrap_string_removeAccents(parent)",
+  "return" : ["JsVar","This string with the accents/diacritics (such as é, ü) removed from characters in the ISO 8859-1 set"]
+}*/
+JsVar *jswrap_string_removeAccents(JsVar *parent) {
+  bool isLowerCase;
+  JsVar *res = jsvNewFromEmptyString();
+  if (!res) return 0; // out of memory
+  JsVar *parentStr = jsvAsString(parent);
+
+  JsvStringIterator itsrc, itdst;
+  jsvStringIteratorNew(&itsrc, parentStr, 0);
+  jsvStringIteratorNew(&itdst, res, 0);
+
+  while (jsvStringIteratorHasChar(&itsrc)) {
+    char ch = jsvStringIteratorGetCharAndNext(&itsrc);
+    if (ch >= 0xE0) {
+      isLowerCase = true;
+      ch -= 32;
+    } else {
+      isLowerCase = false;
+    }
+    if (ch >= 0xC0) {
+      switch (ch) {
+        case 0xC0 ... 0xC5: // À Á Â Ã Ä Å
+          ch = 'A';
+          break;
+        case 0xC6:  // convert Æ to AE
+          jsvStringIteratorAppend(&itdst, isLowerCase ? 'a' : 'A');
+          ch = 'E';
+          break;
+        case 0xC7: // Ç
+          ch = 'C';
+          break;
+        case 0xC8 ... 0xCB: // È É Ê Ë
+          ch = 'E';
+          break;
+        case 0xCC ... 0xCF: // Ì Í Î Ï
+          ch = 'I';
+          break;
+        case 0xD0: // Ð
+          ch = 'D';
+          break;
+        case 0xD1: // Ñ
+          ch = 'N';
+          break;
+        case 0xD2 ... 0xD6: // Ò Ó Ô Õ Ö
+        case 0xD8: // Ø
+          ch = 'O';
+          break;
+        case 0xD9 ... 0xDC: // Ù Ú Û Ü
+          ch = 'U';
+          break;
+        case 0xDD: // Ý
+          ch = 'Y';
+          break;
+        case 0xDE: // Þ
+          ch = 'P';
+          break;
+        case 0xDF: // ß to SS or ÿ to y (if lowercase)
+          if (isLowerCase) {
+            ch = 'Y';
+          } else {
+            jsvStringIteratorAppend(&itdst, 'S');
+            ch = 'S';
+          }
+          break;
+      }
+    }
+    jsvStringIteratorAppend(&itdst, isLowerCase ? ch+32 : ch);
   }
 
   jsvStringIteratorFree(&itsrc);
@@ -647,7 +750,9 @@ original `String`.
 */
 JsVar *jswrap_string_concat(JsVar *parent, JsVar *args) {
   if (!jsvIsString(parent)) return 0;
-  JsVar *str = jsvNewFromStringVar(parent, 0, JSVAPPENDSTRINGVAR_MAXLENGTH);
+  // don't use jsvNewFromStringVar here because it has an optimisation for Flash Strings that just clones (rather than copying)
+  JsVar *str = jsvNewFromEmptyString();
+  jsvAppendStringVarComplete(str, parent);
   JsVar *extra = jsvArrayJoin(args, NULL/*filler*/, false/*ignoreNull*/);
   jsvAppendStringVarComplete(str, extra);
   jsvUnLock(extra);

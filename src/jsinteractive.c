@@ -30,6 +30,9 @@
 #include "bluetooth.h"
 #include "jswrap_bluetooth.h"
 #endif
+#ifdef BANGLEJS
+#include "jswrap_bangle.h" // jsbangle_exec_pending
+#endif
 
 #ifdef ARM
 #define CHAR_DELETE_SEND 0x08
@@ -109,7 +112,7 @@ IOEventFlags jsiGetDeviceFromClass(JsVar *class) {
 JsVar *jsiGetClassNameFromDevice(IOEventFlags device) {
   const char *deviceName = jshGetDeviceString(device);
   if (!deviceName[0]) return 0; // could be empty string
-  return jsvFindChildFromString(execInfo.root, deviceName, false);
+  return jsvFindChildFromString(execInfo.root, deviceName);
 }
 
 NO_INLINE bool jsiEcho() {
@@ -592,7 +595,7 @@ NO_INLINE void jsiDumpObjectState(vcbprintf_callback user_callback, void *user_d
 
 /** Dump the code required to initialise a serial port to this string */
 void jsiDumpSerialInitialisation(vcbprintf_callback user_callback, void *user_data, const char *serialName, bool humanReadableDump) {
-  JsVar *serialVarName = jsvFindChildFromString(execInfo.root, serialName, false);
+  JsVar *serialVarName = jsvFindChildFromString(execInfo.root, serialName);
   JsVar *serialVar = jsvSkipName(serialVarName);
 
   if (serialVar) {
@@ -788,6 +791,9 @@ void jsiSemiInit(bool autoLoad, JsfFileName *loadedFilename) {
 #ifndef SAVE_ON_FLASH
   pinBusyIndicator = DEFAULT_BUSY_PIN_INDICATOR;
 #endif
+#ifdef BANGLEJS
+  bool recoveryMode = false;
+#endif
   // Set __FILE__ if we have a filename available
   if (loadedFilename)
     jsvObjectSetChildAndUnLock(execInfo.root, "__FILE__", jsfVarFromName(*loadedFilename));
@@ -802,7 +808,12 @@ void jsiSemiInit(bool autoLoad, JsfFileName *loadedFilename) {
 #endif
     if (!jsfIsStorageValid(JSFSTT_NORMAL | JSFSTT_FIND_FILENAME_TABLE)) {
       jsiConsolePrintf("Storage is corrupt.\n");
+#ifdef BANGLEJS // On Bangle.js if Storage is corrupt, show a recovery menu
+      autoLoad = false; // don't load code
+      recoveryMode = true; // start recovery menu at end of init
+#else
       jsfResetStorage();
+#endif
     } else {
 #ifdef BANGLEJS
       jsiConsolePrintf("Storage Ok.\n");
@@ -849,6 +860,12 @@ void jsiSemiInit(bool autoLoad, JsfFileName *loadedFilename) {
           // set up terminal to avoid word wrap
           "\e[?7l"
 #endif
+#if (defined(DICKENS) || defined(EMSCRIPTEN_DICKENS))
+          "\n"
+          "------------------------\n"
+          "PROJECT DICKENS "JS_VERSION"\n"
+          "© 2023 G.Williams & TWC\n"
+#else
           // rectangles @ http://www.network-science.de/ascii/
           "\n"
           " ____                 _ \n"
@@ -856,7 +873,7 @@ void jsiSemiInit(bool autoLoad, JsfFileName *loadedFilename) {
           "|  __|_ -| . |  _| | | |   | . |\n"
           "|____|___|  _|_| |___|_|_|_|___|\n"
           "         |_| espruino.com\n"
-          " "JS_VERSION" (c) 2021 G.Williams\n"
+          " "JS_VERSION" (c) 2023 G.Williams\n"
         // Point out about donations - but don't bug people
         // who bought boards that helped Espruino
 #if !defined(PICO) && !defined(ESPRUINOBOARD) && !defined(ESPRUINOWIFI) && !defined(PUCKJS) && !defined(PIXLJS) && !defined(BANGLEJS) && !defined(EMSCRIPTEN)
@@ -864,6 +881,7 @@ void jsiSemiInit(bool autoLoad, JsfFileName *loadedFilename) {
           "Espruino is Open Source. Our work is supported\n"
           "only by sales of official boards and donations:\n"
           "http://espruino.com/Donate\n"
+#endif
 #endif
         );
 #ifdef ESP8266
@@ -876,6 +894,11 @@ void jsiSemiInit(bool autoLoad, JsfFileName *loadedFilename) {
       jsiConsolePrint("\n"); // output new line
     inputLineRemoved = true; // we need to put the input line back...
   }
+
+#ifdef BANGLEJS // On Bangle.js if Storage is corrupt, show a recovery menu
+  if (recoveryMode) // start recovery menu at end of init
+    jsvUnLock(jspEvaluate("setTimeout(Bangle.showRecoveryMenu,100)",true));
+#endif
 }
 
 // The 'proper' init function - this should be called only once at bootup
@@ -1927,6 +1950,10 @@ void jsiIdle() {
     } else if ((eventType == EV_BLUETOOTH_PENDING) || (eventType == EV_BLUETOOTH_PENDING_DATA)) {
       maxEvents -= jsble_exec_pending(&event);
 #endif
+#ifdef BANGLEJS
+    } else if (eventType == EV_BANGLEJS) {
+      jsbangle_exec_pending(&event);
+#endif
 #ifdef I2C_SLAVE
     } else if (DEVICE_IS_I2C(eventType)) {
       // ------------------------------------------------------------------------ I2C CALLBACK
@@ -2419,7 +2446,7 @@ void jsiDumpState(vcbprintf_callback user_callback, void *user_data) {
   while (jsvObjectIteratorHasValue(&it)) {
     JsVar *timer = jsvObjectIteratorGetValue(&it);
     JsVar *timerNumber = jsvObjectIteratorGetKey(&it);
-    JsVar *timerCallback = jsvSkipOneNameAndUnLock(jsvFindChildFromString(timer, "callback", false));
+    JsVar *timerCallback = jsvSkipOneNameAndUnLock(jsvFindChildFromString(timer, "callback"));
     JsVar *timerInterval = jsvObjectGetChildIfExists(timer, "interval");
     user_callback(timerInterval ? "setInterval(" : "setTimeout(", user_data);
     jsiDumpJSON(user_callback, user_data, timerCallback, 0);
@@ -2436,7 +2463,7 @@ void jsiDumpState(vcbprintf_callback user_callback, void *user_data) {
   jsvUnLock(watchArrayPtr);
   while (jsvObjectIteratorHasValue(&it)) {
     JsVar *watch = jsvObjectIteratorGetValue(&it);
-    JsVar *watchCallback = jsvSkipOneNameAndUnLock(jsvFindChildFromString(watch, "callback", false));
+    JsVar *watchCallback = jsvSkipOneNameAndUnLock(jsvFindChildFromString(watch, "callback"));
     bool watchRecur = jsvGetBoolAndUnLock(jsvObjectGetChildIfExists(watch, "recur"));
     int watchEdge = (int)jsvGetIntegerAndUnLock(jsvObjectGetChildIfExists(watch, "edge"));
     JsVar *watchPin = jsvObjectGetChildIfExists(watch, "pin");

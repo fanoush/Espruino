@@ -18,8 +18,9 @@
 
 JsVar *jswrap_string_constructor(JsVar *a);
 JsVar *jswrap_string_fromCharCode(JsVar *arr);
+JsVar *jswrap_string_charAt_undefined(JsVar *parent, JsVarInt idx); // charAt, but returns undefined
 JsVar *jswrap_string_charAt(JsVar *parent, JsVarInt idx);
-int jswrap_string_charCodeAt(JsVar *parent, JsVarInt idx);
+JsVar *jswrap_string_charCodeAt(JsVar *parent, JsVarInt idx);
 int jswrap_string_indexOf(JsVar *parent, JsVar *substring, JsVar *fromIndex, bool lastIndexOf);
 JsVar *jswrap_string_match(JsVar *parent, JsVar *subStr);
 JsVar *jswrap_string_replace(JsVar *parent, JsVar *subStr, JsVar *newSubStr);
@@ -28,6 +29,7 @@ JsVar *jswrap_string_substr(JsVar *parent, JsVarInt pStart, JsVar *vLen);
 JsVar *jswrap_string_slice(JsVar *parent, JsVarInt pStart, JsVar *vEnd);
 JsVar *jswrap_string_split(JsVar *parent, JsVar *split);
 JsVar *jswrap_string_toUpperLowerCase(JsVar *parent, bool upper);
+JsVar *jswrap_string_removeAccents(JsVar *parent);
 JsVar *jswrap_string_trim(JsVar *parent);
 JsVar *jswrap_string_concat(JsVar *parent, JsVar *args);
 bool jswrap_string_startsWith(JsVar *parent, JsVar *search, int position);

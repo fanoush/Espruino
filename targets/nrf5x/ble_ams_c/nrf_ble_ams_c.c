@@ -49,7 +49,11 @@
 #include "ble_db_discovery.h"
 #include "app_error.h"
 #ifdef DEBUG
+#if NRF_SD_BLE_API_VERSION>5
 #define NRF_LOG_MODULE_NAME ble_ams_c
+#else
+#define NRF_LOG_MODULE_NAME "ble_ams_c"
+#endif
 #include "nrf_log.h"
 NRF_LOG_MODULE_REGISTER();
 #else
@@ -444,7 +448,7 @@ ret_code_t ble_ams_c_remote_command_write(ble_ams_c_t const * p_ams_c,
 }
 
 ret_code_t ble_ams_c_entity_update_write(ble_ams_c_t const * p_ams_c,
-                                         ble_ams_c_evt_id_values_t entity_id,
+                                         ble_ams_c_entity_id_values_t entity_id,
                                          uint8_t attribute_number,
                                          uint8_t * attribute_list)
 {
@@ -486,7 +490,7 @@ ret_code_t ble_ams_c_entity_update_write(ble_ams_c_t const * p_ams_c,
 }
 
 ret_code_t ble_ams_c_entity_attribute_write(ble_ams_c_t const * p_ams_c,
-                                            ble_ams_c_evt_id_values_t entity_id,
+                                            ble_ams_c_entity_id_values_t entity_id,
                                             uint8_t attribute_id)
 {
     VERIFY_PARAM_NOT_NULL(p_ams_c);

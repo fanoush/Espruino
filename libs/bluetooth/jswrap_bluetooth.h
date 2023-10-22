@@ -33,6 +33,7 @@ typedef enum {
   BLETASK_ANCS_NOTIF_ATTR,             //< Apple Notification Centre notification attributes (bleTaskInfo=0)
   BLETASK_ANCS_APP_ATTR,               //< Apple Notification Centre app attributes (bleTaskInfo=appId string)
   BLETASK_AMS_ATTR,                    //< Apple Media Service track info request (bleTaskInfo=0)
+  BLETASK_CTS_GET_TIME,                //< CMS get current time
 #endif
 } BleTask;
 
@@ -90,8 +91,10 @@ void jswrap_ble_disconnect();
 void jswrap_ble_sleep();
 void jswrap_ble_wake();
 void jswrap_ble_restart(JsVar *callback);
+void jswrap_ble_eraseBonds();
 JsVar *jswrap_ble_getAddress();
 void jswrap_ble_setAddress(JsVar *address);
+JsVar *jswrap_ble_resolveAddress(JsVar *address);
 
 /// Used by bluetooth.c internally when it needs to set up advertising at first
 JsVar *jswrap_ble_getCurrentAdvertisingData();
@@ -129,6 +132,8 @@ bool jswrap_ble_amsIsActive();
 JsVar *jswrap_ble_amsGetPlayerInfo(JsVar *id);
 JsVar *jswrap_ble_amsGetTrackInfo(JsVar *id);
 void jswrap_ble_amsCommand(JsVar *id);
+bool jswrap_ble_ctsIsActive();
+JsVar *jswrap_ble_ctsGetTime();
 
 JsVar *jswrap_ble_requestDevice(JsVar *options);
 JsVar *jswrap_ble_connect(JsVar *mac, JsVar *options);

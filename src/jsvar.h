@@ -65,15 +65,21 @@ typedef enum {
   _JSV_STRING_START =  JSV_NAME_STRING_INT_0,
     JSV_NAME_STRING_INT_MAX  = JSV_NAME_STRING_INT_0+JSVAR_DATA_STRING_NAME_LEN,
   _JSV_NAME_WITH_VALUE_END = JSV_NAME_STRING_INT_MAX, ///< ---------- End of names that have literal values, NOT references, in firstChild
-    JSV_NAME_STRING_0    = JSV_NAME_STRING_INT_MAX+1, // array/object index as string of length 0
+#ifdef ESPR_UNICODE_SUPPORT
+    JSV_NAME_UTF8_STRING, ///< UTF8 name that just points to a normal string with lastChild, but just tag that the string is a unicode one
+#endif
+    JSV_NAME_STRING_0, // array/object index as string of length 0
     JSV_NAME_STRING_MAX  = JSV_NAME_STRING_0+JSVAR_DATA_STRING_NAME_LEN,
   _JSV_NAME_END    = JSV_NAME_STRING_MAX, ///< ---------- End of NAMEs (names of variables, object fields/etc)
     JSV_STRING_0    = JSV_NAME_STRING_MAX+1, // simple string value of length 0
     JSV_STRING_MAX  = JSV_STRING_0+JSVAR_DATA_STRING_LEN,
     JSV_FLAT_STRING = JSV_STRING_MAX+1, ///< Flat strings store the length (in chars) as an int, and then the subsequent JsVars (in memory) store data
     JSV_NATIVE_STRING = JSV_FLAT_STRING+1, ///< Native strings store an address and length, and reference the underlying data directly
+#ifdef ESPR_UNICODE_SUPPORT
+    JSV_UTF8_STRING, ///< UTF8 that just pointss to a normal string with lastChild, but just tag that the string is a unicode one
+#endif
 #ifdef SPIFLASH_BASE
-    JSV_FLASH_STRING = JSV_NATIVE_STRING+1, ///< Like a native String, but not writable and uses jshFlashRead
+    JSV_FLASH_STRING, ///< Like a native String, but not writable and uses jshFlashRead
     _JSV_STRING_END = JSV_FLASH_STRING,
 #else
     _JSV_STRING_END = JSV_NATIVE_STRING,
@@ -161,7 +167,7 @@ typedef struct {
 /// References
 typedef struct {
   /* padding for data. Must be big enough for an int */
-  int8_t pad[JSVAR_DATA_STRING_NAME_LEN];
+  int8_t pad[JSVAR_DATA_STRING_NAME_LEN_]; // use JSVAR_DATA_STRING_NAME_LEN_ not JSVAR_DATA_STRING_NAME_LEN here so EMBED builds can handle 64 bit
 
   /* For Variable NAMES (e.g. Object/Array keys) these store actual next/previous pointers for a linked list or 0.
    *   - if nextSibling==prevSibling==!0 then they point to the object that should contain this name if it ever gets set to anything that's not undefined
@@ -301,6 +307,10 @@ JsVar *jsvNewFromString(const char *str); ///< Create a new string
 JsVar *jsvNewNameFromString(const char *str); ///< Create a new name from a string
 JsVar *jsvNewStringOfLength(unsigned int byteLength, const char *initialData); ///< Create a new string of the given length - full of 0s (or initialData if specified)
 static ALWAYS_INLINE JsVar *jsvNewFromEmptyString() { return jsvNewWithFlags(JSV_STRING_0); } ;///< Create a new empty string
+#ifdef ESPR_UNICODE_SUPPORT
+JsVar *jsvNewUTF8String(JsVar* dataString); ///< Create a new unicode string using the given data string for backing
+JsVar *jsvNewUTF8StringAndUnLock(JsVar* dataString); ///< Create a new unicode string using the given data string for backing
+#endif
 static ALWAYS_INLINE JsVar *jsvNewNull() { return jsvNewWithFlags(JSV_NULL); } ;///< Create a new null variable
 /** Create a new variable from a substring. argument must be a string. stridx = start char or str, maxLength = max number of characters (can be JSVAPPENDSTRINGVAR_MAXLENGTH)  */
 JsVar *jsvNewFromStringVar(const JsVar *str, size_t stridx, size_t maxLength);
@@ -384,6 +394,7 @@ bool jsvIsInt(const JsVar *v);
 bool jsvIsFloat(const JsVar *v);
 bool jsvIsBoolean(const JsVar *v);
 bool jsvIsString(const JsVar *v); ///< String, or a NAME too
+bool jsvIsUTF8String(const JsVar *v); ///< Just a unicode string (UTF8 JsVar, pointing to a string)
 bool jsvIsBasicString(const JsVar *v); ///< Just a string (NOT a name)
 bool jsvIsStringExt(const JsVar *v); ///< The extra bits dumped onto the end of a string to store more data
 bool jsvIsFlatString(const JsVar *v);
@@ -431,6 +442,7 @@ bool jsvIsStringNumericStrict(const JsVar *var);
 
 // TODO: maybe isName shouldn't include ArrayBufferName?
 bool jsvHasCharacterData(const JsVar *v); ///< does the v->data union contain character data?
+/// Does this variable use lastChild to point to a StringExt?
 bool jsvHasStringExt(const JsVar *v);
 /// Does this variable use firstChild/lastChild to point to multiple children
 bool jsvHasChildren(const JsVar *v);
@@ -510,9 +522,20 @@ static ALWAYS_INLINE void jsvAppendCharacter(JsVar *var, char ch) { jsvAppendStr
 #define JSVAPPENDSTRINGVAR_MAXLENGTH (0x7FFFFFFF)
 void jsvAppendStringVar(JsVar *var, const JsVar *str, size_t stridx, size_t maxLength); ///< Append str to var. Both must be strings. stridx = start char or str, maxLength = max number of characters (can be JSVAPPENDSTRINGVAR_MAXLENGTH)
 void jsvAppendStringVarComplete(JsVar *var, const JsVar *str); ///< Append all of str to var. Both must be strings.
-char jsvGetCharInString(JsVar *v, size_t idx); ///< Get a character at the given index in the String
+int jsvGetCharInString(JsVar *v, size_t idx); ///< Get a character at the given index in the String (handles unicode)
 void jsvSetCharInString(JsVar *v, size_t idx, char ch, bool bitwiseOR); ///< Set a character at the given index in the String. If bitwiseOR, ch will be ORed with the character already at that position.
 int jsvGetStringIndexOf(JsVar *str, char ch); ///< Get the index of a character in a string, or -1
+
+#ifdef ESPR_UNICODE_SUPPORT
+/// If we have a UTF8 string return the string behind it, or just return what was passed in
+JsVar *jsvGetUTF8BackingString(JsVar *str);
+/// Converts the given string of bytes to UTF8 encoding. Doesn't tag the resulting string with UTF8 though
+JsVar *jsvConvertToUTF8AndUnLock(JsVar *str);
+#endif
+/// Convert an UTF8 index in a String to a String index in the backing String. THIS IS SLOW. On non-UTF8 builds it passes straight through
+int jsvConvertFromUTF8Index(JsVar *str, int idx);
+/// Convert a String index in the backing String into a UTF8 index in a String. THIS IS SLOW. On non-UTF8 builds it passes straight through
+int jsvConvertToUTF8Index(JsVar *str, int idx);
 
 JsVarInt jsvGetInteger(const JsVar *v);
 void jsvSetInteger(JsVar *v, JsVarInt value); ///< Set an integer value (use carefully!)
@@ -640,7 +663,8 @@ void jsvAddName(JsVar *parent, JsVar *nameChild); // Add a child, which is itsel
 JsVar *jsvAddNamedChild(JsVar *parent, JsVar *value, const char *name); // Add a child, and create a name for it. Returns a LOCKED var. DOES NOT CHECK FOR DUPLICATES
 void jsvAddNamedChildAndUnLock(JsVar *parent, JsVar *value, const char *name); // Add a child, and create a name for it AND unlock the value and name. DOES NOT CHECK FOR DUPLICATES
 JsVar *jsvSetValueOfName(JsVar *name, JsVar *src); // Set the value of a child created with jsvAddName,jsvAddNamedChild. Returns the UNLOCKED name argument
-JsVar *jsvFindChildFromString(JsVar *parent, const char *name, bool createIfNotFound); // Non-recursive finding of child with name. Returns a LOCKED var
+JsVar *jsvFindChildFromString(JsVar *parent, const char *name); // Non-recursive finding of child with name. Returns a LOCKED var
+JsVar *jsvFindOrAddChildFromString(JsVar *parent, const char *name); // Non-recursive finding of child with name. Returns a LOCKED var
 JsVar *jsvFindChildFromStringI(JsVar *parent, const char *name); ///< Find a child with a matching name using a case insensitive search
 JsVar *jsvFindChildFromVar(JsVar *parent, JsVar *childName, bool addIfNotFound); ///< Non-recursive finding of child with name. Returns a LOCKED var
 
@@ -782,7 +806,7 @@ void jsvFree(void *ptr);
   if (DATA && !TARGET_PTR) {                                                          \
    TARGET_LENGTH = (size_t)jsvIterateCallbackCount(DATA);                     \
     if (TARGET_LENGTH+256 > jsuGetFreeStack()) {                              \
-      jsExceptionHere(JSET_ERROR, "Not enough stack memory to decode data");  \
+      jsExceptionHere(JSET_ERROR, "Not enough stack memory for data");  \
     } else {                                                                  \
       TARGET_PTR = (char *)alloca(TARGET_LENGTH);                             \
       jsvIterateCallbackToBytes(DATA, (unsigned char *)TARGET_PTR,            \

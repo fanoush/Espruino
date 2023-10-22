@@ -15,7 +15,7 @@
 
 void jswrap_banglejs_lcdWr(JsVarInt cmd, JsVar *data);
 void jswrap_banglejs_setLCDPower(bool isOn);
-bool jswrap_banglejs_getLCDPower();
+void jswrap_banglejs_setLCDPowerBacklight(bool isOn);
 void jswrap_banglejs_setLCDBrightness(JsVarFloat v);
 void jswrap_banglejs_setLCDMode(JsVar *mode);
 JsVar *jswrap_banglejs_getLCDMode();
@@ -23,6 +23,7 @@ void jswrap_banglejs_setLCDOffset(int y);
 void jswrap_banglejs_setLCDOverlay(JsVar *imgVar, int x, int y);
 void jswrap_banglejs_setLCDTimeout(JsVarFloat timeout);
 int jswrap_banglejs_isLCDOn();
+int jswrap_banglejs_isBacklightOn();
 void jswrap_banglejs_setLocked(bool isLocked);
 int jswrap_banglejs_isLocked();
 
@@ -72,7 +73,7 @@ JsVar *jswrap_banglejs_buzz(int time, JsVarFloat amt);
 void jswrap_banglejs_off();
 void jswrap_banglejs_softOff();
 JsVar *jswrap_banglejs_getLogo();
-void jswrap_banglejs_factoryReset();
+void jswrap_banglejs_factoryReset(bool noReboot);
 
 JsVar *jswrap_banglejs_appRect();
 
@@ -91,3 +92,14 @@ void jswrap_banglejs_kickPollWatchdog();
 #ifdef EMULATED
 extern void touchHandlerInternal(int tx, int ty, int pts, int gesture);
 #endif
+
+// Used when pushing events/retrieving events from the event queue
+typedef enum {
+  JSBE_HRM_ENV, // new HRM environment reading
+} JsBangleEvent;
+
+/// Called from jsinteractive when an event is parsed from the event queue for Bangle.js (executed outside IRQ)
+void jsbangle_exec_pending(IOEvent *event);
+/// queue an event for Bangle.js (usually called from inside an IRQ)
+void jsbangle_push_event(JsBangleEvent type, uint16_t value);
+

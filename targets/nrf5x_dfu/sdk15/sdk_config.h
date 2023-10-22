@@ -47,6 +47,15 @@
 #include "app_config.h"
 #endif
 
+// Changes needed whem moving from SDK 15.0.0 to 15.3.0
+#ifdef NRF5X_SDK_15_3
+#define APP_TIMER_SAFE_WINDOW_MS 300000
+#define NRF_DFU_SETTINGS_COMPATIBILITY_MODE 0
+#define NRF_BL_APP_SIGNATURE_CHECK_REQUIRED 0
+#define NRF_CRYPTO_BACKEND_MICRO_ECC_PUBLIC_KEY_TRUSTED_ENABLED 0
+#define NRF_CRYPTO_BACKEND_NRF_SW_HASH_LITTLE_ENDIAN_DIGEST_ENABLED 0
+#endif
+
 // <h> nRF_Bootloader
 
 //==========================================================
@@ -972,14 +981,14 @@
 // <i> Minimum GAP connection interval, in 1.25 ms units.
 
 #ifndef NRF_DFU_BLE_MIN_CONN_INTERVAL
-#define NRF_DFU_BLE_MIN_CONN_INTERVAL 12
+#define NRF_DFU_BLE_MIN_CONN_INTERVAL 6 // 7.5ms
 #endif
 
 // <o> NRF_DFU_BLE_MAX_CONN_INTERVAL - Maximum connection interval (units).
 // <i> Maximum GAP connection interval, in 1.25 ms units.
 
 #ifndef NRF_DFU_BLE_MAX_CONN_INTERVAL
-#define NRF_DFU_BLE_MAX_CONN_INTERVAL 12
+#define NRF_DFU_BLE_MAX_CONN_INTERVAL 24 // 30ms
 #endif
 
 // <o> NRF_DFU_BLE_CONN_SUP_TIMEOUT_MS - Supervision timeout (ms).
