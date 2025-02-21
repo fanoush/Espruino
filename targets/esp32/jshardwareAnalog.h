@@ -20,6 +20,7 @@
 void ADCReset();
 void initADC(int ADCgroup);
 int readADC(Pin pin);
+int readVref();
 void rangeADC(Pin pin,int range);
 
 void writeDAC(Pin pin,uint8_t value);

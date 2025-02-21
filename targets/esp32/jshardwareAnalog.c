@@ -16,6 +16,7 @@
  */
 #include "jshardwareAnalog.h"
 #include "driver/adc.h"
+#include "esp_adc_cal.h"
 #if CONFIG_IDF_TARGET_ESP32
 	#include "driver/dac.h"
 #elif CONFIG_IDF_TARGET_ESP32C3
@@ -135,6 +136,12 @@ void rangeADC(Pin pin,int range){
     adc_channel[idx] = rangeToAdcAtten(range);
     printf("Atten:%d \n",adc_channel[idx]);
   }
+}
+int readVref(){
+  //Read eFuse Voltage Reference
+  esp_adc_cal_characteristics_t adc_chars;
+  esp_adc_cal_value_t type = esp_adc_cal_characterize(ADC_UNIT_1, ADC_ATTEN_DB_11, ADC_WIDTH_BIT_12, 0, &adc_chars);
+  return adc_chars.vref;
 }
 
 int readADC(Pin pin){

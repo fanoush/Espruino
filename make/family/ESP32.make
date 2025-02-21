@@ -29,6 +29,7 @@ LDFLAGS += -L$(ESP_IDF_PATH)/ld \
 -L$(ESP_APP_TEMPLATE_PATH)/build/bootloader \
 -L$(ESP_APP_TEMPLATE_PATH)/build/bt \
 -L$(ESP_APP_TEMPLATE_PATH)/build/driver \
+-L$(ESP_APP_TEMPLATE_PATH)/build/esp_adc_cal \
 -L$(ESP_APP_TEMPLATE_PATH)/build/esp32 \
 -L$(ESP_APP_TEMPLATE_PATH)/build/esptool_py \
 -L$(ESP_APP_TEMPLATE_PATH)/build/ethernet \
@@ -61,6 +62,7 @@ INCLUDE+=\
 -I$(ESP_IDF_PATH)/components/pthread/include \
 -I$(ESP_IDF_PATH)/components/bt/include \
 -I$(ESP_IDF_PATH)/components/driver/include \
+-I$(ESP_IDF_PATH)/components/esp_adc_cal/include \
 -I$(ESP_IDF_PATH)/components/esp32/include \
 -I$(ESP_IDF_PATH)/components/freertos/include \
 -I$(ESP_IDF_PATH)/components/heap/include \
@@ -100,6 +102,7 @@ $(ESP_IDF_PATH)/components/newlib/lib/libc-psram-workaround.a \
 $(ESP_IDF_PATH)/components/newlib/lib/libm-psram-workaround.a \
 $(ESP_IDF_PATH)/components/esp32/lib/libcore.a \
 $(ESP_APP_TEMPLATE_PATH)/build/esp_ringbuf/libesp_ringbuf.a \
+$(ESP_APP_TEMPLATE_PATH)/build/esp_adc_cal/libesp_adc_cal.a \
 $(ESP_APP_TEMPLATE_PATH)/build/bootloader_support/libbootloader_support.a \
 $(ESP_APP_TEMPLATE_PATH)/build/bootloader/efuse/libefuse.a \
 -lbt \
