@@ -691,7 +691,7 @@ JsVarFloat jshReadTemperature() {
 
 // the esp8266 can read the VRef but then there's no analog input, so we don't support this
 JsVarFloat jshReadVRef() {
-  JsVarFloat vref = readVref()/1000;
+  JsVarFloat vref = (JsVarFloat) readVref() / 1000;
   return vref;
 }
 
