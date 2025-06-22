@@ -166,6 +166,8 @@ typedef enum {
   BLEP_RESTART_SOFTDEVICE,          //< Perform a softdevice restart (again, we don't want to do this in an IRQ!)
   BLEP_RSSI_PERIPH,                 //< RSSI data from peripheral connection (rssi as data)
   BLEP_ADV_REPORT,                  //< Advertising received (as buffer)
+  BLEP_PHY_UPDATE_REQUEST,          //< PHY update request (connection handle as data, tx,rx phy as buffer)
+  BLEP_PHY_UPDATE,                 //< PHY update finished (connection handle as data, tx,rx phy as buffer)
 #if CENTRAL_LINK_COUNT>0
   BLEP_RSSI_CENTRAL,                //< RSSI data from central connection (rssi as data low byte, index in m_central_conn_handles as high byte )
   BLEP_TASK_FAIL,                   //< Task failed because unknown

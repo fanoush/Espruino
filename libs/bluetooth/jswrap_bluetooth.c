@@ -4155,6 +4155,88 @@ https://webbluetoothcg.github.io/web-bluetooth/#bluetoothremotegattserver
     "return" : ["int", "The handle to this device (if it is currently connected) - the handle is an internal value used by the Bluetooth Stack" ]
 }
 *//*Documentation only*/
+
+void jsble_update_connection(uint16_t connection_handle, JsVar *options){
+#ifdef NRF52_SERIES
+  uint32_t err_code;
+  ble_gap_phys_t gap_phys;
+  uint8_t phy=BLE_GAP_PHY_NOT_SET;
+  JsVar *advPhy = jsvObjectGetChildIfExists(options, "phy");
+  if (jsvIsStringEqual(advPhy,"1mbps")) {
+      phy = BLE_GAP_PHY_1MBPS;
+  } else if (jsvIsStringEqual(advPhy,"2mbps")) {
+      phy = BLE_GAP_PHY_2MBPS;
+  } else if (jsvIsStringEqual(advPhy,"auto")) {
+      phy = BLE_GAP_PHY_AUTO;
+#if NRF_SD_BLE_API_VERSION>5
+  } else if (jsvIsStringEqual(advPhy,"coded")) {
+    phy = BLE_GAP_PHY_CODED;
+#endif
+  } else jsWarn("Unknown phy %q\n", advPhy);
+  jsvUnLock(advPhy);
+  if (phy != BLE_GAP_PHY_NOT_SET){
+    gap_phys.rx_phys =phy;
+    gap_phys.tx_phys =phy;
+    err_code = sd_ble_gap_phy_update(connection_handle, &gap_phys);
+    jsble_check_error(err_code);
+  }
+#endif
+#ifdef ESP32
+  jsWarn("update not implemented\n");
+#endif
+}
+
+
+/*JSON{
+  "type" : "method",
+  "class" : "BluetoothRemoteGATTServer",
+  "name" : "updateConnection",
+  "generate" : "jswrap_BluetoothRemoteGATTServer_updateConnection",
+  "params" : [
+    ["options","JsVar","Same options as when connecting"]
+  ],
+  "#if" : "defined(NRF52_SERIES) || defined(ESP32)"
+}
+
+Update connection parameters (only phy for now)
+
+*/
+void jswrap_BluetoothRemoteGATTServer_updateConnection(JsVar *parent, JsVar *options){
+#if CENTRAL_LINK_COUNT>0
+  if (jsvObjectGetBoolChild(parent,"connected")) {
+  uint16_t central_conn_handle = jswrap_ble_BluetoothRemoteGATTServer_getHandle(parent);
+  if (central_conn_handle != BLE_CONN_HANDLE_INVALID) {
+    // we have a connection, disconnect
+    jsble_update_connection(central_conn_handle,options);
+  } else {
+      jsExceptionHere(JSET_ERROR, "Not connected");
+    }
+  }else{
+    jsExceptionHere(JSET_ERROR, "Not connected");
+  }
+#endif
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "NRF",
+    "name" : "updateConnection",
+    "ifdef" : "NRF52_SERIES",
+    "generate" : "jswrap_ble_updateConnection",
+    "params" : [
+      ["options","JsVar","Same options as when connecting"]
+    ],
+    "#if" : "defined(NRF52_SERIES) || defined(ESP32)"
+}
+*/
+void jswrap_ble_updateConnection(JsVar *options){
+  if (jsble_has_peripheral_connection()) {
+    jsble_update_connection(m_peripheral_conn_handle, options);
+  }else {
+    jsExceptionHere(JSET_ERROR, "Not connected");
+  }
+}
+
 /*JSON{
     "type" : "method",
     "class" : "BluetoothRemoteGATTServer",

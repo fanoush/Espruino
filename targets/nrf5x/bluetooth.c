@@ -338,6 +338,36 @@ int jsble_exec_pending(uint8_t *buffer, int bufferLen) {
      jsble_restart_softdevice(NULL);
      break;
    }
+   case BLEP_PHY_UPDATE: {
+        uint16_t conn_handle = data;
+#if CENTRAL_LINK_COUNT>0
+        int centralIdx = jsble_get_central_connection_idx(conn_handle);
+        JsVar *gattServer = bleGetActiveBluetoothGattServer(centralIdx);
+        if (gattServer) {
+          jsvObjectSetChildAndUnLock(gattServer, "phy_res", jsvNewArrayFromBytes(buffer,bufferLen));
+          jsvUnLock(gattServer);
+        }
+#endif
+        if (conn_handle == m_peripheral_conn_handle) {
+          jsvObjectSetChildAndUnLock(execInfo.hiddenRoot, "phy_res", jsvNewArrayFromBytes(buffer,bufferLen));
+        }
+     break;
+   }
+   case BLEP_PHY_UPDATE_REQUEST: {
+        uint16_t conn_handle = data;
+#if CENTRAL_LINK_COUNT>0
+        int centralIdx = jsble_get_central_connection_idx(conn_handle);
+        JsVar *gattServer = bleGetActiveBluetoothGattServer(centralIdx);
+        if (gattServer) {
+          jsvObjectSetChildAndUnLock(gattServer, "phy_req", jsvNewArrayFromBytes(buffer,bufferLen));
+          jsvUnLock(gattServer);
+        }
+#endif
+        if (conn_handle == m_peripheral_conn_handle) {
+          jsvObjectSetChildAndUnLock(execInfo.hiddenRoot, "phy_req", jsvNewArrayFromBytes(buffer,bufferLen));
+        }
+     break;
+   }
    case BLEP_RSSI_PERIPH: {
      JsVar *evt = jsvNewFromInteger((signed char)data);
      if (evt) jsiQueueObjectCallbacks(execInfo.root, BLE_RSSI_EVENT, &evt, 1);
@@ -1443,6 +1473,11 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
             /* Allow SoftDevice to choose PHY Update Procedure parameters automatically. */
             ble_gap_phys_t phys = {BLE_GAP_PHY_AUTO, BLE_GAP_PHY_AUTO};
             sd_ble_gap_phy_update(p_ble_evt->evt.gap_evt.conn_handle, &phys);
+            uint8_t req_phys[] = {
+              p_ble_evt->evt.gap_evt.params.phy_update_request.peer_preferred_phys.tx_phys,
+              p_ble_evt->evt.gap_evt.params.phy_update_request.peer_preferred_phys.rx_phys
+            };
+            jsble_queue_pending_buf(BLEP_PHY_UPDATE_REQUEST, p_ble_evt->evt.gap_evt.conn_handle, (char*) req_phys, sizeof(req_phys));
             break;
           }
           case BLE_GAP_EVT_PHY_UPDATE: {
@@ -1452,6 +1487,12 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
               p_ble_evt->evt.gap_evt.params.phy_update.rx_phy for the currently active PHYs of
               the link. */
             }
+            uint8_t res[] = {
+              p_ble_evt->evt.gap_evt.params.phy_update.status,
+              p_ble_evt->evt.gap_evt.params.phy_update.tx_phy,
+              p_ble_evt->evt.gap_evt.params.phy_update.rx_phy
+            };
+            jsble_queue_pending_buf(BLEP_PHY_UPDATE, p_ble_evt->evt.gap_evt.conn_handle, (char*) res, sizeof(res));
             break;
           }
 #endif
