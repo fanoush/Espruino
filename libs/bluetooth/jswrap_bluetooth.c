@@ -4159,6 +4159,7 @@ https://webbluetoothcg.github.io/web-bluetooth/#bluetoothremotegattserver
 void jsble_update_connection(uint16_t connection_handle, JsVar *options){
 #ifdef NRF52_SERIES
   uint32_t err_code;
+#if (NRF_SD_BLE_API_VERSION >= 5)
   ble_gap_phys_t gap_phys;
   uint8_t phy=BLE_GAP_PHY_NOT_SET;
   JsVar *advPhy = jsvObjectGetChildIfExists(options, "phy");
@@ -4181,6 +4182,7 @@ void jsble_update_connection(uint16_t connection_handle, JsVar *options){
     jsble_check_error(err_code);
   }
 #endif
+  #endif
 #ifdef ESP32
   jsWarn("update not implemented\n");
 #endif
